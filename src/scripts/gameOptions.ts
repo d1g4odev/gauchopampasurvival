@@ -4,8 +4,12 @@
 export const GameOptions : any = {
 
     gameSize : {
-        width               : 800,      // width of the game, in pixels
-        height              : 800       // height of the game, in pixels
+        width               : 800,      // largura da janela/câmera, em pixels
+        height              : 800       // altura da janela/câmera, em pixels
+    },
+    worldSize : {
+        width               : 2200,     // largura do mundo (campo) — câmera segue o jogador
+        height              : 2200      // altura do mundo
     },
     gameBackgroundColor     : 0x222222, // game background color
 
@@ -33,6 +37,8 @@ export const GameOptions : any = {
     // --- PONTUAÇÃO / XP ---
     scorePerKill            : 10,       // pontos por inimigo morto
     xpPerKill               : 1,        // xp (gema) por inimigo morto
+    healPerKills            : 3,        // a cada N abates, cura o jogador
+    healAmount              : 10,       // quantidade de vida curada
     baseXpToLevel           : 5,        // xp necessário para o primeiro nível
     xpGrowth                : 1.4,      // multiplicador de xp por nível
     gemMagnetRange          : 90        // distância em que a gema é atraída pelo jogador

@@ -141,12 +141,19 @@ export class PlayGame extends Phaser.Scene {
             });
         });
 
-        // Gaúcho
-        this.player = this.physics.add.sprite(GameOptions.gameSize.width / 2, GameOptions.gameSize.height / 2, WEAPONS.revolver.sheet, 0);
+        // Mundo grande com câmera seguindo o jogador
+        const worldW = GameOptions.worldSize.width;
+        const worldH = GameOptions.worldSize.height;
+        this.physics.world.setBounds(0, 0, worldW, worldH);
+        this.cameras.main.setBounds(0, 0, worldW, worldH);
+
+        // Gaúcho no centro do mundo
+        this.player = this.physics.add.sprite(worldW / 2, worldH / 2, WEAPONS.revolver.sheet, 0);
         this.player.setScale(0.6);
         this.player.setOrigin(0.5, 1);
         this.player.setCollideWorldBounds(true);
         this.player.body.setSize(this.player.width * 0.4, this.player.height * 0.4);
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
         // Animações dos inimigos
         ['inimigo1', 'inimigo2', 'inimigo3', 'inimigo4', 'inimigo5'].forEach(type => {
@@ -288,10 +295,10 @@ export class PlayGame extends Phaser.Scene {
     spawnRate() : number { return Math.max(250, GameOptions.enemyRate - this.difficulty() * 60); }
 
     spawnEnemy() : void {
-        const W = GameOptions.gameSize.width;
-        const H = GameOptions.gameSize.height;
-        const outer = new Phaser.Geom.Rectangle(-100, -100, W + 200, H + 200);
-        const inner = new Phaser.Geom.Rectangle(-50, -50, W + 100, H + 100);
+        // Inimigos nascem logo fora da área visível (ao redor do jogador), não nas bordas do mundo
+        const view = this.cameras.main.worldView;
+        const outer = new Phaser.Geom.Rectangle(view.x - 120, view.y - 120, view.width + 240, view.height + 240);
+        const inner = new Phaser.Geom.Rectangle(view.x - 40,  view.y - 40,  view.width + 80,  view.height + 80);
         const spawnPoint = Phaser.Geom.Rectangle.RandomOutside(outer, inner);
 
         // Depois de 20s, ~25% dos inimigos são atiradores (pistoleiros) — usam o inimigo5
@@ -393,11 +400,11 @@ export class PlayGame extends Phaser.Scene {
         bullet.setRotation(angle);
     }
 
-    // Recolhe projéteis inimigos que saíram da tela
+    // Recolhe projéteis inimigos que saíram da área visível
     cleanupEnemyBullets() : void {
-        const { width, height } = GameOptions.gameSize;
+        const view = this.cameras.main.worldView;
         this.enemyBulletGroup.getMatching('visible', true).forEach((b : any) => {
-            if (b.x < -40 || b.x > width + 40 || b.y < -40 || b.y > height + 40) {
+            if (b.x < view.x - 60 || b.x > view.right + 60 || b.y < view.y - 60 || b.y > view.bottom + 60) {
                 this.enemyBulletGroup.killAndHide(b);
                 b.body.enable = false;
             }
@@ -428,7 +435,7 @@ export class PlayGame extends Phaser.Scene {
 
     // --- ESPALHA OBSTÁCULOS PELO CENÁRIO ---
     createObstacles() : void {
-        const { width, height } = GameOptions.gameSize;
+        const { width, height } = GameOptions.worldSize;
         const cx = width / 2, cy = height / 2;
         const placed : { x : number, y : number }[] = [];
 
@@ -441,14 +448,14 @@ export class PlayGame extends Phaser.Scene {
         ];
 
         let attempts = 0;
-        const target = 14;
-        while (placed.length < target && attempts < 200) {
+        const target = Math.floor((width * height) / 120000);   // densidade proporcional à área
+        while (placed.length < target && attempts < 1000) {
             attempts++;
             const x = Phaser.Math.Between(70, width - 70);
-            const y = Phaser.Math.Between(120, height - 70);
+            const y = Phaser.Math.Between(70, height - 70);
             // Evita o centro (spawn do jogador) e sobreposição com outros obstáculos
-            if (Phaser.Math.Distance.Between(x, y, cx, cy) < 130) continue;
-            if (placed.some(p => Phaser.Math.Distance.Between(x, y, p.x, p.y) < 80)) continue;
+            if (Phaser.Math.Distance.Between(x, y, cx, cy) < 160) continue;
+            if (placed.some(p => Phaser.Math.Distance.Between(x, y, p.x, p.y) < 90)) continue;
             placed.push({ x, y });
 
             const k = kinds[Phaser.Math.Between(0, kinds.length - 1)];
@@ -669,12 +676,31 @@ export class PlayGame extends Phaser.Scene {
         getSound().death();
         this.spawnDeathPuff(ex, ey);
 
+        // Cura a cada N abates (se não estiver com a vida cheia)
+        if (this.kills % GameOptions.healPerKills === 0 && this.playerHP < this.playerMaxHP) {
+            this.playerHP = Math.min(this.playerMaxHP, this.playerHP + GameOptions.healAmount);
+            this.showHealText(GameOptions.healAmount);
+            getSound().gem();
+            this.updateHUD();
+        }
+
         const gem : any = this.gemGroup.get(ex, ey, 'xpgem');
         if (gem) {
             gem.setActive(true).setVisible(true);
             gem.body.enable = true;
             gem.setVelocity(0, 0);
         }
+    }
+
+    // Texto verde "+X" subindo sobre o jogador ao curar
+    showHealText(amount : number) : void {
+        const t = this.add.text(this.player.x, this.player.y - 40, `+${amount}`, {
+            fontFamily: 'monospace', fontSize: '22px', color: '#44ff66', fontStyle: 'bold',
+        }).setOrigin(0.5).setDepth(50);
+        this.tweens.add({
+            targets: t, y: t.y - 36, alpha: 0, duration: 800,
+            onComplete: () => t.destroy(),
+        });
     }
 
     collectGem(gem : any) : void {
@@ -750,13 +776,13 @@ export class PlayGame extends Phaser.Scene {
             this.isPaused = true;
             this.physics.pause();
             const { width, height } = GameOptions.gameSize;
-            this.pauseElems.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.6).setDepth(2500));
+            this.pauseElems.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.6).setScrollFactor(0).setDepth(2500));
             this.pauseElems.push(this.add.text(width / 2, height / 2 - 20, 'PAUSADO', {
                 fontFamily: 'monospace', fontSize: '54px', color: '#ffffff', fontStyle: 'bold',
-            }).setOrigin(0.5).setDepth(2501));
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(2501));
             this.pauseElems.push(this.add.text(width / 2, height / 2 + 40, 'ESC para continuar', {
                 fontFamily: 'monospace', fontSize: '20px', color: '#ffcc44',
-            }).setOrigin(0.5).setDepth(2501));
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(2501));
         }
     }
 
@@ -771,10 +797,10 @@ export class PlayGame extends Phaser.Scene {
         snd.gameOver();
 
         const { width, height } = GameOptions.gameSize;
-        this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.65).setDepth(2000);
+        this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.65).setScrollFactor(0).setDepth(2000);
         this.add.text(width / 2, height / 2 - 80, 'VOCÊ TOMBOU', {
             fontFamily: 'monospace', fontSize: '52px', color: '#ff5555', fontStyle: 'bold',
-        }).setOrigin(0.5).setDepth(2001);
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
 
         const min = Math.floor(this.elapsedMs / 60000);
         const sec = Math.floor((this.elapsedMs % 60000) / 1000);
@@ -782,11 +808,11 @@ export class PlayGame extends Phaser.Scene {
         this.add.text(width / 2, height / 2 + 10,
             `Tempo: ${timeStr}\nAbates: ${this.kills}\nPontos: ${this.score}\nNível: ${this.level}`, {
             fontFamily: 'monospace', fontSize: '24px', color: '#ffffff', align: 'center',
-        }).setOrigin(0.5).setDepth(2001);
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
 
         const hint = this.add.text(width / 2, height / 2 + 140, 'ESPAÇO joga de novo  •  ESC volta ao menu', {
             fontFamily: 'monospace', fontSize: '18px', color: '#ffcc44',
-        }).setOrigin(0.5).setDepth(2001);
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
         this.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
 
         this.input.keyboard!.once('keydown-SPACE', () => this.scene.restart());
@@ -841,13 +867,13 @@ export class PlayGame extends Phaser.Scene {
         const choices = pool.slice(0, 3);
 
         const elements : Phaser.GameObjects.GameObject[] = [];
-        elements.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7).setDepth(3000));
+        elements.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7).setScrollFactor(0).setDepth(3000));
         elements.push(this.add.text(width / 2, 150, `NÍVEL ${this.level}!`, {
             fontFamily: 'monospace', fontSize: '46px', color: '#ffdd44', fontStyle: 'bold',
-        }).setOrigin(0.5).setDepth(3001));
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(3001));
         elements.push(this.add.text(width / 2, 205, 'Escolha um upgrade  (1 / 2 / 3)', {
             fontFamily: 'monospace', fontSize: '20px', color: '#ffffff',
-        }).setOrigin(0.5).setDepth(3001));
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(3001));
 
         const cardW = 200, cardH = 240, gap = 30;
         const totalW = cardW * 3 + gap * 2;
@@ -857,10 +883,10 @@ export class PlayGame extends Phaser.Scene {
         choices.forEach((choice, i) => {
             const cx = startX + i * (cardW + gap);
             const stroke = choice.weapon ? 0xff8844 : 0xffdd44;
-            const card = this.add.rectangle(cx, cardY, cardW, cardH, 0x2a2118).setStrokeStyle(3, stroke).setDepth(3001).setInteractive({ useHandCursor: true });
-            const num  = this.add.text(cx, cardY - 85, `[${i + 1}]`, { fontFamily: 'monospace', fontSize: '26px', color: Phaser.Display.Color.IntegerToColor(stroke).rgba }).setOrigin(0.5).setDepth(3002);
-            const ttl  = this.add.text(cx, cardY - 30, choice.title, { fontFamily: 'monospace', fontSize: '19px', color: '#ffffff', fontStyle: 'bold', align: 'center', wordWrap: { width: cardW - 24 } }).setOrigin(0.5).setDepth(3002);
-            const dsc  = this.add.text(cx, cardY + 45, choice.desc, { fontFamily: 'monospace', fontSize: '15px', color: '#cccccc', align: 'center', wordWrap: { width: cardW - 24 } }).setOrigin(0.5).setDepth(3002);
+            const card = this.add.rectangle(cx, cardY, cardW, cardH, 0x2a2118).setStrokeStyle(3, stroke).setScrollFactor(0).setDepth(3001).setInteractive({ useHandCursor: true });
+            const num  = this.add.text(cx, cardY - 85, `[${i + 1}]`, { fontFamily: 'monospace', fontSize: '26px', color: Phaser.Display.Color.IntegerToColor(stroke).rgba }).setOrigin(0.5).setScrollFactor(0).setDepth(3002);
+            const ttl  = this.add.text(cx, cardY - 30, choice.title, { fontFamily: 'monospace', fontSize: '19px', color: '#ffffff', fontStyle: 'bold', align: 'center', wordWrap: { width: cardW - 24 } }).setOrigin(0.5).setScrollFactor(0).setDepth(3002);
+            const dsc  = this.add.text(cx, cardY + 45, choice.desc, { fontFamily: 'monospace', fontSize: '15px', color: '#cccccc', align: 'center', wordWrap: { width: cardW - 24 } }).setOrigin(0.5).setScrollFactor(0).setDepth(3002);
             elements.push(card, num, ttl, dsc);
             card.on('pointerover', () => card.setFillStyle(0x3d3020));
             card.on('pointerout',  () => card.setFillStyle(0x2a2118));
@@ -1014,47 +1040,41 @@ export class PlayGame extends Phaser.Scene {
     }
 
     createBackground() : void {
-        const { width, height } = GameOptions.gameSize;
+        const width  = GameOptions.worldSize.width;
+        const height = GameOptions.worldSize.height;
         const gfx = this.add.graphics();
 
+        // Base de terra seca cobrindo todo o mundo
         gfx.fillStyle(0xc4a265);
         gfx.fillRect(0, 0, width, height);
 
-        const patches = [
-            { x: 60,  y: 80,  w: 90,  h: 50,  c: 0xb8954f },
-            { x: 200, y: 30,  w: 120, h: 60,  c: 0xd4b478 },
-            { x: 420, y: 110, w: 80,  h: 45,  c: 0xb09040 },
-            { x: 600, y: 50,  w: 100, h: 55,  c: 0xcaa055 },
-            { x: 700, y: 200, w: 70,  h: 40,  c: 0xb8954f },
-            { x: 50,  y: 300, w: 110, h: 50,  c: 0xd4b478 },
-            { x: 300, y: 350, w: 95,  h: 60,  c: 0xb09040 },
-            { x: 500, y: 400, w: 80,  h: 45,  c: 0xc4a060 },
-            { x: 150, y: 500, w: 130, h: 55,  c: 0xb8954f },
-            { x: 650, y: 550, w: 90,  h: 50,  c: 0xd0ac6a },
-            { x: 350, y: 620, w: 100, h: 60,  c: 0xb09040 },
-            { x: 80,  y: 680, w: 120, h: 55,  c: 0xc4a060 },
-            { x: 500, y: 700, w: 85,  h: 45,  c: 0xb8954f },
-            { x: 720, y: 720, w: 70,  h: 50,  c: 0xd4b478 },
-        ];
-        patches.forEach(p => { gfx.fillStyle(p.c); gfx.fillEllipse(p.x, p.y, p.w, p.h); });
+        // Manchas de variação de cor (proporcional à área)
+        const patchColors = [0xb8954f, 0xd4b478, 0xb09040, 0xcaa055, 0xc4a060, 0xd0ac6a];
+        const patchCount = Math.floor((width * height) / 24000);
+        for (let i = 0; i < patchCount; i++) {
+            const px = Phaser.Math.Between(0, width);
+            const py = Phaser.Math.Between(0, height);
+            gfx.fillStyle(patchColors[Phaser.Math.Between(0, patchColors.length - 1)]);
+            gfx.fillEllipse(px, py, Phaser.Math.Between(70, 140), Phaser.Math.Between(40, 65));
+        }
 
-        gfx.lineStyle(1, 0xa88848, 0.25);
+        // Grade sutil de terra
+        gfx.lineStyle(1, 0xa88848, 0.22);
         const tileSize = 40;
         for (let x = 0; x <= width; x += tileSize) gfx.lineBetween(x, 0, x, height);
         for (let y = 0; y <= height; y += tileSize) gfx.lineBetween(0, y, width, y);
 
+        // Tufos de grama espalhados
         const grassColor = 0x8a9a3a;
-        const tufts = [
-            [120, 150], [280, 90],  [450, 200], [620, 140], [740, 320],
-            [90,  420], [320, 480], [560, 530], [180, 620], [680, 660],
-            [400, 740], [760, 760], [240, 760], [500, 80],  [660, 400],
-        ];
-        tufts.forEach(([tx, ty]) => {
+        const tuftCount = Math.floor((width * height) / 26000);
+        for (let i = 0; i < tuftCount; i++) {
+            const tx = Phaser.Math.Between(10, width - 10);
+            const ty = Phaser.Math.Between(10, height - 20);
             gfx.fillStyle(grassColor, 0.7);
             gfx.fillTriangle(tx, ty, tx - 6, ty + 14, tx + 6, ty + 14);
             gfx.fillTriangle(tx + 8, ty + 4, tx + 2, ty + 16, tx + 14, ty + 16);
             gfx.fillTriangle(tx - 8, ty + 4, tx - 14, ty + 16, tx - 2, ty + 16);
-        });
+        }
 
         gfx.setDepth(-10);
     }
