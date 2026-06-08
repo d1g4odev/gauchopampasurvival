@@ -3,6 +3,7 @@
 // modules to import
 import Phaser from 'phaser';                                    // Phaser
 import { PreloadAssets } from './scenes/preloadAssets';         // preloadAssets scene
+import { Menu } from './scenes/menu';                           // menu scene
 import { PlayGame } from './scenes/playGame';                   // playGame scene
 import { GameOptions } from './gameOptions';                    // game options
 
@@ -22,6 +23,7 @@ const configObject : Phaser.Types.Core.GameConfig = {
     scale          : scaleObject,                               // scale settings
     scene          : [
         PreloadAssets,                                          // PreloadAssets scene
+        Menu,                                                   // Menu scene
         PlayGame                                                // PlayGame scene
     ],
     physics : {
