@@ -262,12 +262,20 @@ export class PlayGame extends Phaser.Scene {
 
         const enemy : any = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, keys[idx], 0);
         enemy.setScale(0.5);
+        const maxHp = GameOptions.enemyBaseHP + this.difficulty();
         enemy.setData('type', names[idx]);
-        enemy.setData('hp', GameOptions.enemyBaseHP + this.difficulty());
+        enemy.setData('hp', maxHp);
+        enemy.setData('maxHp', maxHp);
         enemy.setData('bladeCd', 0);
         enemy.body.setSize(enemy.width * 0.5, enemy.height * 0.5);
         enemy.anims.play(`${names[idx]}_down`, true);
         this.enemyGroup.add(enemy);
+
+        // Barra de vida abaixo do inimigo
+        const barBg   = this.add.rectangle(enemy.x, enemy.y + 24, 40, 6, 0x000000, 0.7).setDepth(8);
+        const barFill = this.add.rectangle(enemy.x - 19, enemy.y + 24, 38, 4, 0x33dd44).setOrigin(0, 0.5).setDepth(9);
+        enemy.setData('barBg', barBg);
+        enemy.setData('barFill', barFill);
     }
 
     updateMovementAnimation(movementDirection : Phaser.Math.Vector2) : void {
@@ -297,6 +305,18 @@ export class PlayGame extends Phaser.Scene {
                 enemy.anims.play(dx > 0 ? `${type}_right` : `${type}_left`, true);
             } else {
                 enemy.anims.play(dy > 0 ? `${type}_down` : `${type}_up`, true);
+            }
+
+            // Acompanha a barra de vida abaixo do inimigo
+            const barBg   = enemy.getData('barBg');
+            const barFill = enemy.getData('barFill');
+            if (barBg && barFill) {
+                const by = enemy.y + 24;
+                barBg.setPosition(enemy.x, by);
+                barFill.setPosition(enemy.x - 19, by);
+                const ratio = Phaser.Math.Clamp(enemy.getData('hp') / enemy.getData('maxHp'), 0, 1);
+                barFill.width = 38 * ratio;
+                barFill.setFillStyle(ratio > 0.5 ? 0x33dd44 : ratio > 0.25 ? 0xddaa33 : 0xdd3333);
             }
         });
     }
@@ -498,6 +518,12 @@ export class PlayGame extends Phaser.Scene {
         enemy.clearTint();
         enemy.body.checkCollision.none = true;
         enemy.body.enable = false;
+
+        // Remove a barra de vida do inimigo morto
+        const barBg = enemy.getData('barBg');   if (barBg)   barBg.destroy();
+        const barFill = enemy.getData('barFill'); if (barFill) barFill.destroy();
+        enemy.setData('barBg', null);
+        enemy.setData('barFill', null);
 
         this.score += GameOptions.scorePerKill;
         this.kills += 1;

@@ -15,7 +15,7 @@ export const GameOptions : any = {
     bulletSpeed             : 200,      // bullet speed, in pixels per second
     bulletRate              : 1000,     // bullet rate, in milliseconds per bullet
     enemyRate               : 800,      // enemy spawn rate base, in milliseconds
-    enemyBaseHP             : 3,        // vida base dos inimigos (escala com o tempo)
+    enemyBaseHP             : 6,        // vida base: 2 tiros de revólver ou 2 chicotadas
 
     // --- VIDA DO JOGADOR ---
     playerMaxHP             : 100,      // vida máxima do jogador
