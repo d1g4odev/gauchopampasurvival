@@ -39,8 +39,8 @@ export class Menu extends Phaser.Scene {
 
         // Controles
         this.add.text(width / 2, height - 170,
-            'WASD para mover   •   Tiro automático\nESC para pausar   •   M para mudo', {
-            fontFamily: 'monospace', fontSize: '18px', color: '#dddddd', align: 'center',
+            'WASD mover   •   Mouse mira   •   Clique/ESPAÇO atira\nESC para pausar   •   M para mudo', {
+            fontFamily: 'monospace', fontSize: '17px', color: '#dddddd', align: 'center',
         }).setOrigin(0.5);
 
         // Chamada para começar

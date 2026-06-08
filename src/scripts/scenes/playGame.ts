@@ -156,7 +156,7 @@ export class PlayGame extends Phaser.Scene {
         this.player.body.setSize(this.player.width * 0.4, this.player.height * 0.4);
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
-        // Animações dos inimigos
+        // Animações de caminhada dos inimigos
         ['inimigo1', 'inimigo2', 'inimigo3', 'inimigo4', 'inimigo5'].forEach(type => {
             const key = `${type}_walk`;
             ['down', 'up', 'right', 'left'].forEach((dir, i) => {
@@ -186,12 +186,16 @@ export class PlayGame extends Phaser.Scene {
             'up'    : Phaser.Input.Keyboard.KeyCodes.W,
             'left'  : Phaser.Input.Keyboard.KeyCodes.A,
             'down'  : Phaser.Input.Keyboard.KeyCodes.S,
-            'right' : Phaser.Input.Keyboard.KeyCodes.D
+            'right' : Phaser.Input.Keyboard.KeyCodes.D,
+            'fire'  : Phaser.Input.Keyboard.KeyCodes.SPACE
         });
 
         // ESC pausa, M muta
         keyboard.on('keydown-ESC', () => this.togglePause());
         keyboard.on('keydown-M',   () => getSound().toggleMute());
+
+        // Cursor de mira
+        this.input.setDefaultCursor('crosshair');
 
         // Projétil x Inimigo (com perfuração e lista de já-atingidos)
         this.physics.add.collider(this.bulletGroup, this.enemyGroup, (bullet : any, enemy : any) => {
@@ -330,17 +334,17 @@ export class PlayGame extends Phaser.Scene {
 
     updateMovementAnimation(movementDirection : Phaser.Math.Vector2) : void {
         const w = this.currentWeapon;
-        if (movementDirection.x > 0) {
-            this.lastDir = 'right'; this.player.anims.play(`gaucho_${w}_right`, true);
-        } else if (movementDirection.x < 0) {
-            this.lastDir = 'left';  this.player.anims.play(`gaucho_${w}_left`, true);
-        } else if (movementDirection.y > 0) {
-            this.lastDir = 'down';  this.player.anims.play(`gaucho_${w}_down`, true);
-        } else if (movementDirection.y < 0) {
-            this.lastDir = 'up';    this.player.anims.play(`gaucho_${w}_up`, true);
+        // O gaúcho sempre encara o cursor (mira)
+        const dir = this.angleToDir(this.aimAngle());
+        this.lastDir = dir;
+        const moving = movementDirection.x !== 0 || movementDirection.y !== 0;
+        if (moving) {
+            this.player.anims.play(`gaucho_${w}_${dir}`, true);
         } else {
+            // Parado: congela no primeiro frame da direção encarada
             this.player.anims.stop();
-            this.player.setFrame(0);
+            const idleFrame : any = { down: 0, up: 4, right: 8, left: 12 };
+            this.player.setFrame(idleFrame[dir]);
         }
     }
 
@@ -502,46 +506,48 @@ export class PlayGame extends Phaser.Scene {
         }
     }
 
-    // Dispara APENAS a arma atualmente equipada
+    // Dispara a arma atual no ESPAÇO, na direção que o gaúcho está virado
     handleWeaponFire() : void {
         const key = this.currentWeapon;
         const w = WEAPONS[key];
-        if (w.behavior === 'orbit') return;   // faca: dano contínuo em updateOrbitals, sem projétil
+        if (w.behavior === 'orbit') return;   // faca: dano contínuo em updateOrbitals (passiva, sem tiro)
+
+        // Atira com clique esquerdo ou ESPAÇO
+        const firing = this.input.activePointer.leftButtonDown() || this.controlKeys.fire.isDown;
+        if (!firing) return;
 
         const effFireRate = w.fireRate * this.fireRateMult;
-        if (this.time.now <= this.lastFired + effFireRate) return;
+        if (this.time.now <= this.lastFired + effFireRate) return;   // cooldown entre tiros
 
-        const closest : any = this.physics.closest(this.player, this.enemyGroup.getMatching('visible', true));
+        const angle = this.aimAngle();   // mira na direção do cursor (360°)
 
         if (w.behavior === 'cone') {
             // chicote: golpe em área, NENHUM projétil
-            this.fireCone(key, closest);
-            this.lastFired = this.time.now;
-            getSound().shoot(key);
-        } else if (closest != null) {
+            this.fireCone(key, angle);
+        } else {
             const lvl = this.weaponLevels[key];
             if (w.behavior === 'spread') {
-                this.fireSpreadN(key, closest, w.pellets + (lvl - 1));
+                this.fireSpreadN(key, angle, w.pellets + (lvl - 1));
             } else if (w.behavior === 'pierce') {
-                this.fireProjectile(key, closest, w.pierce + Math.floor((lvl - 1) / 2), 0);
+                this.fireProjectile(key, angle, w.pierce + Math.floor((lvl - 1) / 2), 0);
             } else {
                 // revólver: ganha projéteis extras com o nível
                 const shots = 1 + Math.floor((lvl - 1) / 2);
                 if (shots === 1) {
-                    this.fireProjectile(key, closest, 1, 0);
+                    this.fireProjectile(key, angle, 1, 0);
                 } else {
                     const spread = 14 * (shots - 1);
                     for (let i = 0; i < shots; i++) {
-                        this.fireProjectile(key, closest, 1, -spread / 2 + (spread / (shots - 1)) * i);
+                        this.fireProjectile(key, angle, 1, -spread / 2 + (spread / (shots - 1)) * i);
                     }
                 }
             }
-            this.lastFired = this.time.now;
-            getSound().shoot(key);
         }
+        this.lastFired = this.time.now;
+        getSound().shoot(key);
     }
 
-    fireProjectile(weaponKey : string, target : any, pierce : number, angleOffsetDeg : number) : void {
+    fireProjectile(weaponKey : string, baseAngle : number, pierce : number, angleOffsetDeg : number) : void {
         const w = WEAPONS[weaponKey];
         const bullet : any = this.bulletGroup.get(this.player.x, this.player.y, w.proj);
         if (!bullet) return;
@@ -553,26 +559,22 @@ export class PlayGame extends Phaser.Scene {
         bullet.setData('pierce', pierce);
         bullet.setData('hitList', []);
 
-        const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
         const angle = baseAngle + Phaser.Math.DegToRad(angleOffsetDeg);
         const speed = w.bulletSpeed * this.bulletSpeedMult;
         bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
         bullet.setRotation(angle);
     }
 
-    fireSpreadN(weaponKey : string, target : any, n : number) : void {
+    fireSpreadN(weaponKey : string, baseAngle : number, n : number) : void {
         const spread = WEAPONS[weaponKey].spreadDeg;
         for (let i = 0; i < n; i++) {
             const offset = -spread / 2 + (spread / (n - 1)) * i;
-            this.fireProjectile(weaponKey, target, 1, offset);
+            this.fireProjectile(weaponKey, baseAngle, 1, offset);
         }
     }
 
-    fireCone(weaponKey : string, closest : any) : void {
+    fireCone(weaponKey : string, angle : number) : void {
         const w = WEAPONS[weaponKey];
-        const angle = closest != null
-            ? Phaser.Math.Angle.Between(this.player.x, this.player.y, closest.x, closest.y)
-            : this.dirToAngle(this.lastDir);
         const half = Phaser.Math.DegToRad(w.coneDeg / 2);
 
         const g = this.add.graphics().setDepth(6);
@@ -624,6 +626,22 @@ export class PlayGame extends Phaser.Scene {
             case 'up':    return -Math.PI / 2;
             default:      return Math.PI / 2;
         }
+    }
+
+    // Ângulo do jogador até o cursor, em coordenadas do mundo (câmera segue o jogador)
+    aimAngle() : number {
+        const p = this.input.activePointer;
+        const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+        return Phaser.Math.Angle.Between(this.player.x, this.player.y, wp.x, wp.y);
+    }
+
+    // Converte um ângulo na direção cardeal mais próxima (para o sprite de 4 direções)
+    angleToDir(angle : number) : string {
+        const deg = Phaser.Math.RadToDeg(angle);
+        if (deg >= -45 && deg < 45)  return 'right';
+        if (deg >= 45 && deg < 135)  return 'down';
+        if (deg >= -135 && deg < -45) return 'up';
+        return 'left';
     }
 
     // ==========================================================
