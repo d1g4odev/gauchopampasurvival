@@ -48,7 +48,6 @@ export class PlayGame extends Phaser.Scene {
     enemyGroup       : Phaser.Physics.Arcade.Group;
     bulletGroup      : Phaser.Physics.Arcade.Group;
     enemyBulletGroup : Phaser.Physics.Arcade.Group;
-    gemGroup         : Phaser.Physics.Arcade.Group;
     obstacleGroup    : Phaser.Physics.Arcade.StaticGroup;
 
     // --- ESTADO DO JOGO ---
@@ -80,6 +79,7 @@ export class PlayGame extends Phaser.Scene {
     orbitAngle      : number;
 
     // --- HUD ---
+    xpDisplayRatio : number;
     hpBarFill  : Phaser.GameObjects.Rectangle;
     hpText     : Phaser.GameObjects.Text;
     xpBarFill  : Phaser.GameObjects.Rectangle;
@@ -100,6 +100,7 @@ export class PlayGame extends Phaser.Scene {
         this.level          = 1;
         this.xp             = 0;
         this.xpToNext       = GameOptions.baseXpToLevel;
+        this.xpDisplayRatio = 0;
         this.elapsedMs      = 0;
         this.lastSpawn      = 0;
         this.knockbackUntil = 0;
@@ -177,7 +178,6 @@ export class PlayGame extends Phaser.Scene {
         this.enemyGroup       = this.physics.add.group();
         this.bulletGroup      = this.physics.add.group();
         this.enemyBulletGroup = this.physics.add.group();
-        this.gemGroup         = this.physics.add.group();
         this.obstacleGroup    = this.physics.add.staticGroup();
         this.createObstacles();
 
@@ -213,9 +213,6 @@ export class PlayGame extends Phaser.Scene {
 
         // Jogador x Inimigo (dano por contato)
         this.physics.add.overlap(this.player, this.enemyGroup, (_p : any, enemy : any) => this.damagePlayer(enemy.x, enemy.y, GameOptions.enemyDamage));
-        // Jogador x Gema (coleta)
-        this.physics.add.overlap(this.player, this.gemGroup, (_p : any, gem : any) => this.collectGem(gem));
-
         // Jogador e inimigos colidem com os obstáculos (bloqueio de movimento)
         this.physics.add.collider(this.player, this.obstacleGroup);
         this.physics.add.collider(this.enemyGroup, this.obstacleGroup);
@@ -272,7 +269,6 @@ export class PlayGame extends Phaser.Scene {
         if (this.time.now < this.knockbackUntil) {
             this.updateMovementAnimation(movementDirection);
             this.updateEnemies();
-            this.updateGems();
             this.updateOrbitals();
             return;
         }
@@ -286,7 +282,6 @@ export class PlayGame extends Phaser.Scene {
 
         this.updateMovementAnimation(movementDirection);
         this.updateEnemies();
-        this.updateGems();
         this.updateOrbitals();
     }
 
@@ -425,10 +420,10 @@ export class PlayGame extends Phaser.Scene {
             this.spawnDeathPuff(ox, oy);
             if (drop === 'heal') {
                 this.playerHP = Math.min(this.playerMaxHP, this.playerHP + 20);
+                this.showFloatText('+20', ox, oy - 20, '#44ff66');
                 this.updateHUD();
             } else if (drop === 'xp') {
-                const gem : any = this.gemGroup.get(ox, oy, 'xpgem');
-                if (gem) { gem.setActive(true).setVisible(true); gem.body.enable = true; gem.setVelocity(0, 0); }
+                this.grantXP(GameOptions.xpShooter, ox, oy);
             }
         }
     }
@@ -465,17 +460,6 @@ export class PlayGame extends Phaser.Scene {
             obs.setData('hp', k.hp);
             obs.setData('drop', k.drop);
         }
-    }
-
-    updateGems() : void {
-        this.gemGroup.getMatching('visible', true).forEach((gem : any) => {
-            const dist = Phaser.Math.Distance.Between(gem.x, gem.y, this.player.x, this.player.y);
-            if (dist < GameOptions.gemMagnetRange) {
-                this.physics.moveToObject(gem, this.player, 260);
-            } else {
-                gem.setVelocity(0, 0);
-            }
-        });
     }
 
     // ==========================================================
@@ -676,42 +660,35 @@ export class PlayGame extends Phaser.Scene {
         getSound().death();
         this.spawnDeathPuff(ex, ey);
 
+        // XP direto: atirador vale mais que o corpo-a-corpo
+        const xpGain = enemy.getData('role') === 'ranged' ? GameOptions.xpShooter : GameOptions.xpMelee;
+        this.grantXP(xpGain, ex, ey);
+
         // Cura a cada N abates (se não estiver com a vida cheia)
         if (this.kills % GameOptions.healPerKills === 0 && this.playerHP < this.playerMaxHP) {
             this.playerHP = Math.min(this.playerMaxHP, this.playerHP + GameOptions.healAmount);
-            this.showHealText(GameOptions.healAmount);
-            getSound().gem();
+            this.showFloatText(`+${GameOptions.healAmount}`, this.player.x, this.player.y - 40, '#44ff66');
             this.updateHUD();
-        }
-
-        const gem : any = this.gemGroup.get(ex, ey, 'xpgem');
-        if (gem) {
-            gem.setActive(true).setVisible(true);
-            gem.body.enable = true;
-            gem.setVelocity(0, 0);
         }
     }
 
-    // Texto verde "+X" subindo sobre o jogador ao curar
-    showHealText(amount : number) : void {
-        const t = this.add.text(this.player.x, this.player.y - 40, `+${amount}`, {
-            fontFamily: 'monospace', fontSize: '22px', color: '#44ff66', fontStyle: 'bold',
+    // Balãozinho de texto subindo e sumindo (minimalista)
+    showFloatText(text : string, x : number, y : number, color : string) : void {
+        const t = this.add.text(x, y, text, {
+            fontFamily: 'monospace', fontSize: '18px', color, fontStyle: 'bold',
         }).setOrigin(0.5).setDepth(50);
+        t.setStroke('#000000', 3);
         this.tweens.add({
-            targets: t, y: t.y - 36, alpha: 0, duration: 800,
+            targets: t, y: y - 34, alpha: 0, duration: 750, ease: 'Cubic.easeOut',
             onComplete: () => t.destroy(),
         });
     }
 
-    collectGem(gem : any) : void {
-        this.gemGroup.killAndHide(gem);
-        gem.body.enable = false;
-        getSound().gem();
-        this.addXP(GameOptions.xpPerKill);
-    }
-
-    addXP(amount : number) : void {
+    // Concede XP, mostra o balão "+N XP" e cuida do level up
+    grantXP(amount : number, x : number, y : number) : void {
         this.xp += amount;
+        getSound().gem();
+        this.showFloatText(`+${amount} XP`, x, y - 20, '#7ddcff');
         while (this.xp >= this.xpToNext) {
             this.xp -= this.xpToNext;
             this.levelUp();
@@ -915,12 +892,6 @@ export class PlayGame extends Phaser.Scene {
 
     // --- TEXTURAS GERADAS POR CÓDIGO ---
     createTextures() : void {
-        if (!this.textures.exists('xpgem')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x44ff88, 1); g.fillCircle(7, 7, 6);
-            g.lineStyle(2, 0xffffff, 0.9); g.strokeCircle(7, 7, 6);
-            g.generateTexture('xpgem', 14, 14); g.destroy();
-        }
         if (!this.textures.exists('blade')) {
             const g = this.make.graphics({ x: 0, y: 0 });
             g.fillStyle(0x999999, 1); g.fillTriangle(0, 4, 26, 7, 0, 11);
@@ -1026,8 +997,10 @@ export class PlayGame extends Phaser.Scene {
         this.hpBarFill.setFillStyle(hpRatio > 0.5 ? 0x44dd55 : hpRatio > 0.25 ? 0xddaa33 : 0xdd3333);
         this.hpText.setText(`${Math.ceil(this.playerHP)} / ${this.playerMaxHP}`);
 
+        // Barra de XP sobe suavemente (lerp) em vez de pular
         const xpRatio = Phaser.Math.Clamp(this.xp / this.xpToNext, 0, 1);
-        this.xpBarFill.width = GameOptions.gameSize.width * xpRatio;
+        this.xpDisplayRatio = Phaser.Math.Linear(this.xpDisplayRatio, xpRatio, 0.15);
+        this.xpBarFill.width = GameOptions.gameSize.width * this.xpDisplayRatio;
 
         this.levelText.setText(`Nível ${this.level}`);
 

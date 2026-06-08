@@ -36,11 +36,11 @@ export const GameOptions : any = {
 
     // --- PONTUAÇÃO / XP ---
     scorePerKill            : 10,       // pontos por inimigo morto
-    xpPerKill               : 1,        // xp (gema) por inimigo morto
+    xpMelee                 : 5,        // xp ganho ao matar inimigo corpo-a-corpo
+    xpShooter               : 10,       // xp ganho ao matar o pistoleiro
     healPerKills            : 3,        // a cada N abates, cura o jogador
     healAmount              : 10,       // quantidade de vida curada
-    baseXpToLevel           : 5,        // xp necessário para o primeiro nível
-    xpGrowth                : 1.4,      // multiplicador de xp por nível
-    gemMagnetRange          : 90        // distância em que a gema é atraída pelo jogador
+    baseXpToLevel           : 30,       // xp necessário para o primeiro nível
+    xpGrowth                : 1.4       // multiplicador de xp por nível
 
 }
