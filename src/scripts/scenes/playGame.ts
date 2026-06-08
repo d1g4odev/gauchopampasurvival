@@ -1,7 +1,38 @@
 // THE GAME ITSELF
 
 // modules to import
-import { GameOptions } from '../gameOptions';   // game options   
+import { GameOptions } from '../gameOptions';   // game options
+import { getSound } from '../soundManager';     // procedural sound
+
+// --- DEFINIÇÃO DAS ARMAS ---
+// Cada arma tem um comportamento de disparo distinto e sobe de nível.
+const WEAPONS : any = {
+    revolver : {
+        name: 'Revólver',   desc: 'Tiro único certeiro',
+        sheet: 'gaucho_walk_revolver', proj: 'proj_revolver', behavior: 'single',
+        fireRate: 650, damage: 3, bulletSpeed: 280,
+    },
+    shotgun : {
+        name: 'Espingarda', desc: 'Leque de chumbo',
+        sheet: 'gaucho_walk_shotgun', proj: 'proj_shotgun', behavior: 'spread',
+        fireRate: 1100, damage: 2, bulletSpeed: 250, pellets: 5, spreadDeg: 38,
+    },
+    rifle : {
+        name: 'Rifle',      desc: 'Rápido e perfurante',
+        sheet: 'gaucho_walk_rifle', proj: 'proj_rifle', behavior: 'pierce',
+        fireRate: 320, damage: 2, bulletSpeed: 420, pierce: 3,
+    },
+    knife : {
+        name: 'Faca',       desc: 'Lâminas orbitais',
+        sheet: 'gaucho_walk_knife', behavior: 'orbit',
+        damage: 2, orbitCount: 3, orbitRadius: 72, orbitSpeed: 0.07,
+    },
+    whip : {
+        name: 'Chicote',    desc: 'Golpe em área',
+        sheet: 'gaucho_walk_whip', behavior: 'cone',
+        fireRate: 800, damage: 4, range: 135, coneDeg: 90,
+    },
+};
 
 // PlayGame class extends Phaser.Scene class
 export class PlayGame extends Phaser.Scene {
@@ -12,136 +43,812 @@ export class PlayGame extends Phaser.Scene {
         });
     }
 
-    controlKeys : any;                                                  // keys used to move the player
-    player      : Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;    // the player
-    enemyGroup  : Phaser.Physics.Arcade.Group;                          // group with all enemies
+    controlKeys : any;
+    player      : Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
+    enemyGroup  : Phaser.Physics.Arcade.Group;
+    bulletGroup : Phaser.Physics.Arcade.Group;
+    gemGroup    : Phaser.Physics.Arcade.Group;
 
-    // method to be called once the instance has been created
+    // --- ESTADO DO JOGO ---
+    playerHP      : number;
+    playerMaxHP   : number;
+    score         : number;
+    kills         : number;
+    level         : number;
+    xp            : number;
+    xpToNext      : number;
+    elapsedMs     : number;
+    lastSpawn     : number;
+    knockbackUntil: number;
+    isInvincible  : boolean;
+    isGameOver    : boolean;
+    isPaused      : boolean;
+    upgradeActive : boolean;
+    lastDir       : string;
+
+    // --- ARMAS (uma ativa por vez) ---
+    currentWeapon   : string;
+    unlockedWeapons : string[];
+    weaponLevels    : { [key : string] : number };
+    lastFired       : number;
+    damageMult      : number;
+    fireRateMult    : number;
+    bulletSpeedMult : number;
+    orbitals        : Phaser.GameObjects.Image[];
+    orbitAngle      : number;
+
+    // --- HUD ---
+    hpBarFill  : Phaser.GameObjects.Rectangle;
+    hpText     : Phaser.GameObjects.Text;
+    xpBarFill  : Phaser.GameObjects.Rectangle;
+    levelText  : Phaser.GameObjects.Text;
+    timeText   : Phaser.GameObjects.Text;
+    scoreText  : Phaser.GameObjects.Text;
+    killsText  : Phaser.GameObjects.Text;
+    weaponText : Phaser.GameObjects.Text;
+    pauseElems : Phaser.GameObjects.GameObject[];
+
     create() : void {
 
-        // --- ROW MAPPING CONFIGURATION ---
-        // Based on a 4x4 grid (4 columns, 4 rows). Total 16 frames.
-        
-        // Row 1: Frames 0 to 3
-        this.anims.create({ key: 'gaucho_down',  frames: this.anims.generateFrameNumbers('gaucho_walk_revolver', { start: 0, end: 3 }),  frameRate: 8, repeat: -1 });
-        
-        // Row 2: Frames 4 to 7
-        this.anims.create({ key: 'gaucho_up',    frames: this.anims.generateFrameNumbers('gaucho_walk_revolver', { start: 4, end: 7 }), frameRate: 8, repeat: -1 });
-        
-        // Row 3: Frames 8 to 11
-        this.anims.create({ key: 'gaucho_right', frames: this.anims.generateFrameNumbers('gaucho_walk_revolver', { start: 8, end: 11 }), frameRate: 8, repeat: -1 });
-        
-        // Row 4: Frames 12 to 15
-        this.anims.create({ key: 'gaucho_left',  frames: this.anims.generateFrameNumbers('gaucho_walk_revolver', { start: 12, end: 15 }), frameRate: 8, repeat: -1 });
+        // Reinicializa todo o estado (importante no restart da cena)
+        this.playerMaxHP    = GameOptions.playerMaxHP;
+        this.playerHP       = this.playerMaxHP;
+        this.score          = 0;
+        this.kills          = 0;
+        this.level          = 1;
+        this.xp             = 0;
+        this.xpToNext       = GameOptions.baseXpToLevel;
+        this.elapsedMs      = 0;
+        this.lastSpawn      = 0;
+        this.knockbackUntil = 0;
+        this.isInvincible   = false;
+        this.isGameOver     = false;
+        this.isPaused       = false;
+        this.upgradeActive  = false;
+        this.lastDir        = 'down';
 
-        // Adiciona o Gaúcho no centro da tela usando a folha correta e frame 0 inicial
-        this.player = this.physics.add.sprite(GameOptions.gameSize.width / 2, GameOptions.gameSize.height / 2, 'gaucho_walk_revolver', 0);
-        // Aumenta a escala para visibilidade e define origem para alinhar aos pés
-        this.player.setScale(1.5);
+        this.currentWeapon   = 'revolver';
+        this.unlockedWeapons = ['revolver'];
+        this.weaponLevels    = { revolver: 1 };
+        this.lastFired       = 0;
+        this.damageMult      = 1;
+        this.fireRateMult    = 1;
+        this.bulletSpeedMult = 1;
+        this.orbitals        = [];
+        this.orbitAngle      = 0;
+        this.pauseElems      = [];
+
+        GameOptions.playerSpeed = GameOptions.basePlayerSpeed;
+
+        // Garante áudio ativo e trilha tocando (idempotente)
+        const snd = getSound();
+        snd.resume();
+        snd.startMusic();
+
+        this.createBackground();
+        this.createTextures();
+
+        // Animações de caminhada de cada arma (grade 4x4: down/up/right/left)
+        Object.keys(WEAPONS).forEach(w => {
+            const sheet = WEAPONS[w].sheet;
+            ['down', 'up', 'right', 'left'].forEach((dir, i) => {
+                const key = `gaucho_${w}_${dir}`;
+                if (!this.anims.exists(key)) {
+                    this.anims.create({ key, frames: this.anims.generateFrameNumbers(sheet, { start: i * 4, end: i * 4 + 3 }), frameRate: 8, repeat: -1 });
+                }
+            });
+        });
+
+        // Gaúcho
+        this.player = this.physics.add.sprite(GameOptions.gameSize.width / 2, GameOptions.gameSize.height / 2, WEAPONS.revolver.sheet, 0);
+        this.player.setScale(0.6);
         this.player.setOrigin(0.5, 1);
         this.player.setCollideWorldBounds(true);
-        
-        this.enemyGroup = this.physics.add.group();
-        const bulletGroup : Phaser.Physics.Arcade.Group = this.physics.add.group();
+        this.player.body.setSize(this.player.width * 0.4, this.player.height * 0.4);
 
-        // Configura os controles no teclado para usar WASD
-        const keyboard : Phaser.Input.Keyboard.KeyboardPlugin = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin; 
+        // Animações dos inimigos
+        ['inimigo1', 'inimigo2', 'inimigo3', 'inimigo4', 'inimigo5'].forEach(type => {
+            const key = `${type}_walk`;
+            ['down', 'up', 'right', 'left'].forEach((dir, i) => {
+                const animKey = `${type}_${dir}`;
+                if (!this.anims.exists(animKey)) {
+                    this.anims.create({ key: animKey, frames: this.anims.generateFrameNumbers(key, { start: i * 4, end: i * 4 + 3 }), frameRate: 8, repeat: -1 });
+                }
+            });
+        });
+
+        this.enemyGroup  = this.physics.add.group();
+        this.bulletGroup = this.physics.add.group();
+        this.gemGroup    = this.physics.add.group();
+
+        const keyboard : Phaser.Input.Keyboard.KeyboardPlugin = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin;
         this.controlKeys = keyboard.addKeys({
             'up'    : Phaser.Input.Keyboard.KeyCodes.W,
             'left'  : Phaser.Input.Keyboard.KeyCodes.A,
             'down'  : Phaser.Input.Keyboard.KeyCodes.S,
             'right' : Phaser.Input.Keyboard.KeyCodes.D
         });
-        
-        // Configuração das áreas retangulares de spawn dos inimigos
-        const outerRectangle : Phaser.Geom.Rectangle = new Phaser.Geom.Rectangle(-100, -100, GameOptions.gameSize.width + 200, GameOptions.gameSize.height + 200);
-        const innerRectangle : Phaser.Geom.Rectangle = new Phaser.Geom.Rectangle(-50, -50, GameOptions.gameSize.width + 100, GameOptions.gameSize.height + 100);
 
-        // Evento cíclico para criar novos inimigos
-        this.time.addEvent({
-            delay       : GameOptions.enemyRate,
-            loop        : true,
-            callback    : () => {
-                const spawnPoint : Phaser.Geom.Point = Phaser.Geom.Rectangle.RandomOutside(outerRectangle, innerRectangle);
-                const enemy : Phaser.Types.Physics.Arcade.SpriteWithDynamicBody = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, 'enemy'); 
-                this.enemyGroup.add(enemy); 
-            },
+        // ESC pausa, M muta
+        keyboard.on('keydown-ESC', () => this.togglePause());
+        keyboard.on('keydown-M',   () => getSound().toggleMute());
+
+        // Projétil x Inimigo (com perfuração e lista de já-atingidos)
+        this.physics.add.collider(this.bulletGroup, this.enemyGroup, (bullet : any, enemy : any) => {
+            const hitList : any[] = bullet.getData('hitList') || [];
+            if (hitList.includes(enemy)) return;
+            hitList.push(enemy);
+            bullet.setData('hitList', hitList);
+
+            this.damageEnemy(enemy, bullet.getData('damage') || 1);
+
+            const pierce = (bullet.getData('pierce') || 1) - 1;
+            bullet.setData('pierce', pierce);
+            if (pierce <= 0) {
+                this.bulletGroup.killAndHide(bullet);
+                bullet.body.checkCollision.none = true;
+                bullet.body.enable = false;
+            }
         });
 
-        // Evento cíclico para disparar projéteis automaticamente no inimigo mais próximo
-        this.time.addEvent({
-            delay       : GameOptions.bulletRate,
-            loop        : true,
-            callback    : () => {
-                const closestEnemy : any = this.physics.closest(this.player, this.enemyGroup.getMatching('visible', true));
-                if (closestEnemy != null) {
-                    const bullet : Phaser.Types.Physics.Arcade.SpriteWithDynamicBody = this.physics.add.sprite(this.player.x, this.player.y, 'bullet'); 
-                    bulletGroup.add(bullet); 
-                    this.physics.moveToObject(bullet, closestEnemy, GameOptions.bulletSpeed);
-                }
-            },
-        });
+        // Jogador x Inimigo (dano)
+        this.physics.add.overlap(this.player, this.enemyGroup, (_p : any, enemy : any) => this.damagePlayer(enemy));
+        // Jogador x Gema (coleta)
+        this.physics.add.overlap(this.player, this.gemGroup, (_p : any, gem : any) => this.collectGem(gem));
 
-        // Colisão entre Projéteis Vs Inimigos
-        this.physics.add.collider(bulletGroup, this.enemyGroup, (bullet : any, enemy : any) => {
-            bulletGroup.killAndHide(bullet);
-            bullet.body.checkCollision.none = true;
-            this.enemyGroup.killAndHide(enemy);
-            enemy.body.checkCollision.none = true;
-        });
-
-        // Colisão entre Jogador Vs Inimigos (Reinicia a cena caso seja tocado)
-        this.physics.add.collider(this.player, this.enemyGroup, () => {
-            this.scene.restart();
-        });  
+        this.createHUD();
+        this.equipWeapon('revolver');
     }
 
-    // Método executado a cada frame do jogo
-    update() {   
-        
-        // Calcula o vetor de direção com base no teclado
-        let movementDirection : Phaser.Math.Vector2 = new Phaser.Math.Vector2(0, 0);  
-        if (this.controlKeys.right.isDown) {
-            movementDirection.x ++;  
+    update(_time : number, delta : number) {
+
+        if (this.isGameOver || this.isPaused) {
+            return;
         }
-        if (this.controlKeys.left.isDown) {
-            movementDirection.x --;
+
+        this.elapsedMs += delta;
+        this.updateHUD();
+
+        if (this.time.now > this.lastSpawn + this.spawnRate()) {
+            this.spawnEnemy();
+            this.lastSpawn = this.time.now;
         }
-        if (this.controlKeys.up.isDown) {
-            movementDirection.y --;    
+
+        this.handleWeaponFire();
+
+        // Direção pelo teclado
+        let movementDirection : Phaser.Math.Vector2 = new Phaser.Math.Vector2(0, 0);
+        if (this.controlKeys.right.isDown) movementDirection.x ++;
+        if (this.controlKeys.left.isDown)  movementDirection.x --;
+        if (this.controlKeys.up.isDown)    movementDirection.y --;
+        if (this.controlKeys.down.isDown)  movementDirection.y ++;
+
+        // Durante knockback, mantém o empurrão
+        if (this.time.now < this.knockbackUntil) {
+            this.updateMovementAnimation(movementDirection);
+            this.updateEnemies();
+            this.updateGems();
+            this.updateOrbitals();
+            return;
         }
-        if (this.controlKeys.down.isDown) {
-            movementDirection.y ++;    
-        }
-        
-        // Aplica velocidade e corrige aceleração diagonal dividindo pela raiz de 2
+
         this.player.setVelocity(0, 0);
         if (movementDirection.x == 0 || movementDirection.y == 0) {
             this.player.setVelocity(movementDirection.x * GameOptions.playerSpeed, movementDirection.y * GameOptions.playerSpeed);
-        }
-        else {
-            this.player.setVelocity(movementDirection.x * GameOptions.playerSpeed / Math.sqrt(2), movementDirection.y * GameOptions.playerSpeed / Math.sqrt(2));    
-        } 
-
-        // --- GERENCIADOR DINÂMICO DE ANIMAÇÃO DO MOVIMENTO ---
-        if (movementDirection.x > 0) {
-            this.player.anims.play('gaucho_right', true);
-        } else if (movementDirection.x < 0) {
-            this.player.anims.play('gaucho_left', true);
-        } else if (movementDirection.y > 0) {
-            this.player.anims.play('gaucho_down', true);
-        } else if (movementDirection.y < 0) {
-            this.player.anims.play('gaucho_up', true);
         } else {
-            // Caso o personagem pare de andar, congela a animação
-            this.player.anims.stop();
-            // Retorna ao frame neutro inicial da linha de caminhada para baixo
-            this.player.setFrame(0); 
+            this.player.setVelocity(movementDirection.x * GameOptions.playerSpeed / Math.sqrt(2), movementDirection.y * GameOptions.playerSpeed / Math.sqrt(2));
         }
 
-        // Faz os inimigos ativos perseguirem a posição do jogador
+        this.updateMovementAnimation(movementDirection);
+        this.updateEnemies();
+        this.updateGems();
+        this.updateOrbitals();
+    }
+
+    // --- DIFICULDADE PROGRESSIVA ---
+    difficulty() : number { return Math.floor(this.elapsedMs / 30000); }
+    spawnRate() : number { return Math.max(250, GameOptions.enemyRate - this.difficulty() * 60); }
+
+    spawnEnemy() : void {
+        const W = GameOptions.gameSize.width;
+        const H = GameOptions.gameSize.height;
+        const outer = new Phaser.Geom.Rectangle(-100, -100, W + 200, H + 200);
+        const inner = new Phaser.Geom.Rectangle(-50, -50, W + 100, H + 100);
+        const spawnPoint = Phaser.Geom.Rectangle.RandomOutside(outer, inner);
+
+        const keys  = ['inimigo1_walk', 'inimigo2_walk', 'inimigo3_walk', 'inimigo4_walk', 'inimigo5_walk'];
+        const names = ['inimigo1', 'inimigo2', 'inimigo3', 'inimigo4', 'inimigo5'];
+        const idx = Phaser.Math.Between(0, keys.length - 1);
+
+        const enemy : any = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, keys[idx], 0);
+        enemy.setScale(0.5);
+        enemy.setData('type', names[idx]);
+        enemy.setData('hp', GameOptions.enemyBaseHP + this.difficulty());
+        enemy.setData('bladeCd', 0);
+        enemy.body.setSize(enemy.width * 0.5, enemy.height * 0.5);
+        enemy.anims.play(`${names[idx]}_down`, true);
+        this.enemyGroup.add(enemy);
+    }
+
+    updateMovementAnimation(movementDirection : Phaser.Math.Vector2) : void {
+        const w = this.currentWeapon;
+        if (movementDirection.x > 0) {
+            this.lastDir = 'right'; this.player.anims.play(`gaucho_${w}_right`, true);
+        } else if (movementDirection.x < 0) {
+            this.lastDir = 'left';  this.player.anims.play(`gaucho_${w}_left`, true);
+        } else if (movementDirection.y > 0) {
+            this.lastDir = 'down';  this.player.anims.play(`gaucho_${w}_down`, true);
+        } else if (movementDirection.y < 0) {
+            this.lastDir = 'up';    this.player.anims.play(`gaucho_${w}_up`, true);
+        } else {
+            this.player.anims.stop();
+            this.player.setFrame(0);
+        }
+    }
+
+    updateEnemies() : void {
+        const speed = GameOptions.enemySpeed + this.difficulty() * 6;
         this.enemyGroup.getMatching('visible', true).forEach((enemy : any) => {
-            this.physics.moveToObject(enemy, this.player, GameOptions.enemySpeed);
+            this.physics.moveToObject(enemy, this.player, speed);
+            const type = enemy.getData('type') as string;
+            const dx = this.player.x - enemy.x;
+            const dy = this.player.y - enemy.y;
+            if (Math.abs(dx) > Math.abs(dy)) {
+                enemy.anims.play(dx > 0 ? `${type}_right` : `${type}_left`, true);
+            } else {
+                enemy.anims.play(dy > 0 ? `${type}_down` : `${type}_up`, true);
+            }
         });
+    }
+
+    updateGems() : void {
+        this.gemGroup.getMatching('visible', true).forEach((gem : any) => {
+            const dist = Phaser.Math.Distance.Between(gem.x, gem.y, this.player.x, this.player.y);
+            if (dist < GameOptions.gemMagnetRange) {
+                this.physics.moveToObject(gem, this.player, 260);
+            } else {
+                gem.setVelocity(0, 0);
+            }
+        });
+    }
+
+    // ==========================================================
+    //  SISTEMA DE ARMAS (múltiplas simultâneas)
+    // ==========================================================
+
+    // Equipa uma arma (substitui a atual). Desbloqueia se for a primeira vez.
+    equipWeapon(w : string) : void {
+        if (!this.unlockedWeapons.includes(w)) {
+            this.unlockedWeapons.push(w);
+            this.weaponLevels[w] = 1;
+        }
+        this.currentWeapon = w;
+        this.player.setTexture(WEAPONS[w].sheet, 0);
+        this.lastFired = this.time.now;
+        this.rebuildOrbitals();   // cria lâminas se for a faca, limpa caso contrário
+        this.updateWeaponHUD();
+    }
+
+    levelUpWeapon(w : string) : void {
+        this.weaponLevels[w] += 1;
+        if (w === this.currentWeapon) this.rebuildOrbitals();
+        this.updateWeaponHUD();
+    }
+
+    effDamage(key : string) : number {
+        const lvl = this.weaponLevels[key];
+        return WEAPONS[key].damage * (1 + 0.3 * (lvl - 1)) * this.damageMult;
+    }
+
+    // Recria as lâminas orbitais — só existem quando a arma atual é a faca
+    rebuildOrbitals() : void {
+        this.orbitals.forEach(o => o.destroy());
+        this.orbitals = [];
+        if (this.currentWeapon !== 'knife') return;
+        const lvl = this.weaponLevels['knife'];
+        const count = Math.min(8, WEAPONS.knife.orbitCount + Math.floor((lvl - 1) / 2));
+        for (let i = 0; i < count; i++) {
+            this.orbitals.push(this.add.image(this.player.x, this.player.y, 'blade').setDepth(7));
+        }
+    }
+
+    // Dispara APENAS a arma atualmente equipada
+    handleWeaponFire() : void {
+        const key = this.currentWeapon;
+        const w = WEAPONS[key];
+        if (w.behavior === 'orbit') return;   // faca: dano contínuo em updateOrbitals, sem projétil
+
+        const effFireRate = w.fireRate * this.fireRateMult;
+        if (this.time.now <= this.lastFired + effFireRate) return;
+
+        const closest : any = this.physics.closest(this.player, this.enemyGroup.getMatching('visible', true));
+
+        if (w.behavior === 'cone') {
+            // chicote: golpe em área, NENHUM projétil
+            this.fireCone(key, closest);
+            this.lastFired = this.time.now;
+            getSound().shoot(key);
+        } else if (closest != null) {
+            const lvl = this.weaponLevels[key];
+            if (w.behavior === 'spread') {
+                this.fireSpreadN(key, closest, w.pellets + (lvl - 1));
+            } else if (w.behavior === 'pierce') {
+                this.fireProjectile(key, closest, w.pierce + Math.floor((lvl - 1) / 2), 0);
+            } else {
+                // revólver: ganha projéteis extras com o nível
+                const shots = 1 + Math.floor((lvl - 1) / 2);
+                if (shots === 1) {
+                    this.fireProjectile(key, closest, 1, 0);
+                } else {
+                    const spread = 14 * (shots - 1);
+                    for (let i = 0; i < shots; i++) {
+                        this.fireProjectile(key, closest, 1, -spread / 2 + (spread / (shots - 1)) * i);
+                    }
+                }
+            }
+            this.lastFired = this.time.now;
+            getSound().shoot(key);
+        }
+    }
+
+    fireProjectile(weaponKey : string, target : any, pierce : number, angleOffsetDeg : number) : void {
+        const w = WEAPONS[weaponKey];
+        const bullet : any = this.bulletGroup.get(this.player.x, this.player.y, w.proj);
+        if (!bullet) return;
+        bullet.setTexture(w.proj);
+        bullet.setActive(true).setVisible(true);
+        bullet.body.checkCollision.none = false;
+        bullet.body.enable = true;
+        bullet.setData('damage', this.effDamage(weaponKey));
+        bullet.setData('pierce', pierce);
+        bullet.setData('hitList', []);
+
+        const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
+        const angle = baseAngle + Phaser.Math.DegToRad(angleOffsetDeg);
+        const speed = w.bulletSpeed * this.bulletSpeedMult;
+        bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+        bullet.setRotation(angle);
+    }
+
+    fireSpreadN(weaponKey : string, target : any, n : number) : void {
+        const spread = WEAPONS[weaponKey].spreadDeg;
+        for (let i = 0; i < n; i++) {
+            const offset = -spread / 2 + (spread / (n - 1)) * i;
+            this.fireProjectile(weaponKey, target, 1, offset);
+        }
+    }
+
+    fireCone(weaponKey : string, closest : any) : void {
+        const w = WEAPONS[weaponKey];
+        const angle = closest != null
+            ? Phaser.Math.Angle.Between(this.player.x, this.player.y, closest.x, closest.y)
+            : this.dirToAngle(this.lastDir);
+        const half = Phaser.Math.DegToRad(w.coneDeg / 2);
+
+        const g = this.add.graphics().setDepth(6);
+        g.fillStyle(0xffffff, 0.22);
+        g.slice(this.player.x, this.player.y, w.range, angle - half, angle + half, false);
+        g.fillPath();
+        this.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => g.destroy() });
+
+        const dmg = this.effDamage(weaponKey);
+        this.enemyGroup.getMatching('visible', true).forEach((enemy : any) => {
+            const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y);
+            if (d <= w.range) {
+                const a = Phaser.Math.Angle.Between(this.player.x, this.player.y, enemy.x, enemy.y);
+                if (Math.abs(Phaser.Math.Angle.Wrap(a - angle)) <= half) {
+                    this.damageEnemy(enemy, dmg);
+                }
+            }
+        });
+    }
+
+    updateOrbitals() : void {
+        if (this.orbitals.length === 0) return;
+        const w = WEAPONS.knife;
+        this.orbitAngle += w.orbitSpeed;
+        const count = this.orbitals.length;
+        const dmg = this.effDamage('knife');
+
+        this.orbitals.forEach((blade, i) => {
+            const a = this.orbitAngle + (i / count) * Math.PI * 2;
+            blade.x = this.player.x + Math.cos(a) * w.orbitRadius;
+            blade.y = this.player.y + Math.sin(a) * w.orbitRadius;
+            blade.setRotation(a);
+
+            this.enemyGroup.getMatching('visible', true).forEach((enemy : any) => {
+                if (this.time.now > enemy.getData('bladeCd')) {
+                    if (Phaser.Math.Distance.Between(blade.x, blade.y, enemy.x, enemy.y) < 26) {
+                        this.damageEnemy(enemy, dmg);
+                        enemy.setData('bladeCd', this.time.now + 350);
+                    }
+                }
+            });
+        });
+    }
+
+    dirToAngle(dir : string) : number {
+        switch (dir) {
+            case 'right': return 0;
+            case 'left':  return Math.PI;
+            case 'up':    return -Math.PI / 2;
+            default:      return Math.PI / 2;
+        }
+    }
+
+    // ==========================================================
+    //  COMBATE / PROGRESSÃO
+    // ==========================================================
+
+    damageEnemy(enemy : any, dmg : number) : void {
+        if (!enemy.active) return;
+        const hp = enemy.getData('hp') - dmg;
+        enemy.setData('hp', hp);
+        getSound().hit();
+
+        enemy.setTintFill(0xffffff);
+        this.time.delayedCall(60, () => { if (enemy.active) enemy.clearTint(); });
+
+        if (hp <= 0) this.killEnemy(enemy);
+    }
+
+    killEnemy(enemy : any) : void {
+        const ex = enemy.x, ey = enemy.y;
+        this.enemyGroup.killAndHide(enemy);
+        enemy.clearTint();
+        enemy.body.checkCollision.none = true;
+        enemy.body.enable = false;
+
+        this.score += GameOptions.scorePerKill;
+        this.kills += 1;
+        getSound().death();
+        this.spawnDeathPuff(ex, ey);
+
+        const gem : any = this.gemGroup.get(ex, ey, 'xpgem');
+        if (gem) {
+            gem.setActive(true).setVisible(true);
+            gem.body.enable = true;
+            gem.setVelocity(0, 0);
+        }
+    }
+
+    collectGem(gem : any) : void {
+        this.gemGroup.killAndHide(gem);
+        gem.body.enable = false;
+        getSound().gem();
+        this.addXP(GameOptions.xpPerKill);
+    }
+
+    addXP(amount : number) : void {
+        this.xp += amount;
+        while (this.xp >= this.xpToNext) {
+            this.xp -= this.xpToNext;
+            this.levelUp();
+        }
+    }
+
+    levelUp() : void {
+        this.level += 1;
+        this.xpToNext = Math.floor(this.xpToNext * GameOptions.xpGrowth);
+        getSound().levelUp();
+        this.showUpgradeMenu();
+    }
+
+    damagePlayer(enemy : any) : void {
+        if (this.isInvincible || this.isGameOver) return;
+        this.playerHP -= GameOptions.enemyDamage;
+        this.isInvincible = true;
+        getSound().hurt();
+
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+        this.player.setVelocity(Math.cos(angle) * GameOptions.knockbackForce, Math.sin(angle) * GameOptions.knockbackForce);
+        this.knockbackUntil = this.time.now + GameOptions.knockbackMs;
+
+        this.tweens.add({ targets: this.player, alpha: 0.3, duration: 100, yoyo: true, repeat: 3 });
+        this.cameras.main.shake(120, 0.008);
+
+        this.time.delayedCall(GameOptions.invincibilityMs, () => {
+            this.isInvincible = false;
+            this.player.setAlpha(1);
+        });
+
+        this.updateHUD();
+        if (this.playerHP <= 0) {
+            this.playerHP = 0;
+            this.gameOver();
+        }
+    }
+
+    spawnDeathPuff(x : number, y : number) : void {
+        for (let i = 0; i < 6; i++) {
+            const p = this.add.rectangle(x, y, 4, 4, 0xc4a265).setDepth(5);
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 10 + Math.random() * 18;
+            this.tweens.add({
+                targets : p,
+                x: x + Math.cos(angle) * dist, y: y + Math.sin(angle) * dist,
+                alpha: 0, duration: 350, onComplete: () => p.destroy(),
+            });
+        }
+    }
+
+    // --- PAUSA (ESC) ---
+    togglePause() : void {
+        if (this.isGameOver || this.upgradeActive) return;
+
+        if (this.isPaused) {
+            this.isPaused = false;
+            this.physics.resume();
+            this.pauseElems.forEach(e => e.destroy());
+            this.pauseElems = [];
+        } else {
+            this.isPaused = true;
+            this.physics.pause();
+            const { width, height } = GameOptions.gameSize;
+            this.pauseElems.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.6).setDepth(2500));
+            this.pauseElems.push(this.add.text(width / 2, height / 2 - 20, 'PAUSADO', {
+                fontFamily: 'monospace', fontSize: '54px', color: '#ffffff', fontStyle: 'bold',
+            }).setOrigin(0.5).setDepth(2501));
+            this.pauseElems.push(this.add.text(width / 2, height / 2 + 40, 'ESC para continuar', {
+                fontFamily: 'monospace', fontSize: '20px', color: '#ffcc44',
+            }).setOrigin(0.5).setDepth(2501));
+        }
+    }
+
+    gameOver() : void {
+        this.isGameOver = true;
+        this.physics.pause();
+        this.orbitals.forEach(o => o.setVisible(false));
+        this.player.setTint(0xff4444);
+        this.player.anims.stop();
+        const snd = getSound();
+        snd.stopMusic();
+        snd.gameOver();
+
+        const { width, height } = GameOptions.gameSize;
+        this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.65).setDepth(2000);
+        this.add.text(width / 2, height / 2 - 80, 'VOCÊ TOMBOU', {
+            fontFamily: 'monospace', fontSize: '52px', color: '#ff5555', fontStyle: 'bold',
+        }).setOrigin(0.5).setDepth(2001);
+
+        const min = Math.floor(this.elapsedMs / 60000);
+        const sec = Math.floor((this.elapsedMs % 60000) / 1000);
+        const timeStr = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        this.add.text(width / 2, height / 2 + 10,
+            `Tempo: ${timeStr}\nAbates: ${this.kills}\nPontos: ${this.score}\nNível: ${this.level}`, {
+            fontFamily: 'monospace', fontSize: '24px', color: '#ffffff', align: 'center',
+        }).setOrigin(0.5).setDepth(2001);
+
+        const hint = this.add.text(width / 2, height / 2 + 140, 'ESPAÇO joga de novo  •  ESC volta ao menu', {
+            fontFamily: 'monospace', fontSize: '18px', color: '#ffcc44',
+        }).setOrigin(0.5).setDepth(2001);
+        this.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+        this.input.keyboard!.once('keydown-SPACE', () => this.scene.restart());
+        this.input.keyboard!.once('keydown-ESC',   () => this.scene.start('Menu'));
+    }
+
+    // --- MENU DE UPGRADE NO LEVEL UP ---
+    showUpgradeMenu() : void {
+        this.isPaused = true;
+        this.upgradeActive = true;
+        this.physics.pause();
+
+        const { width, height } = GameOptions.gameSize;
+
+        // Trocar para outra arma (substitui a atual). Marca "(nova)" se ainda não desbloqueada.
+        const switchChoices = Object.keys(WEAPONS).filter(w => w !== this.currentWeapon).map(w => {
+            const isNew = !this.unlockedWeapons.includes(w);
+            return {
+                title: `${isNew ? 'Nova arma' : 'Trocar p/'}: ${WEAPONS[w].name}`,
+                desc : isNew ? WEAPONS[w].desc : `${WEAPONS[w].desc} (Nv ${this.weaponLevels[w]})`,
+                weapon: true,
+                apply: () => this.equipWeapon(w),
+            };
+        });
+
+        // Subir o nível da arma atualmente equipada
+        const cur = this.currentWeapon;
+        const levelUpCurrent = {
+            title: `${WEAPONS[cur].name} Nv ${this.weaponLevels[cur] + 1}`,
+            desc : 'Aprimora a arma equipada', weapon: true,
+            apply: () => this.levelUpWeapon(cur),
+        };
+
+        const statChoices = [
+            { title: 'Gatilho Rápido', desc: '+20% cadência',           weapon: false, apply: () => { this.fireRateMult *= 0.8; } },
+            { title: 'Pólvora Forte',  desc: '+25% dano',                weapon: false, apply: () => { this.damageMult *= 1.25; } },
+            { title: 'Couro Curtido',  desc: '+25 vida máx. e cura',     weapon: false, apply: () => { this.playerMaxHP += 25; this.playerHP = Math.min(this.playerMaxHP, this.playerHP + 25); } },
+            { title: 'Pés Ligeiros',   desc: '+15% velocidade',          weapon: false, apply: () => { GameOptions.playerSpeed *= 1.15; } },
+            { title: 'Bala Veloz',     desc: '+25% vel. do projétil',    weapon: false, apply: () => { this.bulletSpeedMult *= 1.25; } },
+            { title: 'Pampa Restaura', desc: 'Cura 40 de vida',          weapon: false, apply: () => { this.playerHP = Math.min(this.playerMaxHP, this.playerHP + 40); } },
+        ];
+
+        // Monta 3 opções variadas: nível da arma atual + 1 troca de arma + atributos
+        const pool : any[] = [levelUpCurrent];
+        if (switchChoices.length > 0) pool.push(Phaser.Utils.Array.GetRandom(switchChoices));
+        const rest = Phaser.Utils.Array.Shuffle([...statChoices]);
+        for (const r of rest) {
+            if (pool.length >= 3) break;
+            pool.push(r);
+        }
+        Phaser.Utils.Array.Shuffle(pool);
+        const choices = pool.slice(0, 3);
+
+        const elements : Phaser.GameObjects.GameObject[] = [];
+        elements.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7).setDepth(3000));
+        elements.push(this.add.text(width / 2, 150, `NÍVEL ${this.level}!`, {
+            fontFamily: 'monospace', fontSize: '46px', color: '#ffdd44', fontStyle: 'bold',
+        }).setOrigin(0.5).setDepth(3001));
+        elements.push(this.add.text(width / 2, 205, 'Escolha um upgrade  (1 / 2 / 3)', {
+            fontFamily: 'monospace', fontSize: '20px', color: '#ffffff',
+        }).setOrigin(0.5).setDepth(3001));
+
+        const cardW = 200, cardH = 240, gap = 30;
+        const totalW = cardW * 3 + gap * 2;
+        const startX = (width - totalW) / 2 + cardW / 2;
+        const cardY  = height / 2 + 30;
+
+        choices.forEach((choice, i) => {
+            const cx = startX + i * (cardW + gap);
+            const stroke = choice.weapon ? 0xff8844 : 0xffdd44;
+            const card = this.add.rectangle(cx, cardY, cardW, cardH, 0x2a2118).setStrokeStyle(3, stroke).setDepth(3001).setInteractive({ useHandCursor: true });
+            const num  = this.add.text(cx, cardY - 85, `[${i + 1}]`, { fontFamily: 'monospace', fontSize: '26px', color: Phaser.Display.Color.IntegerToColor(stroke).rgba }).setOrigin(0.5).setDepth(3002);
+            const ttl  = this.add.text(cx, cardY - 30, choice.title, { fontFamily: 'monospace', fontSize: '19px', color: '#ffffff', fontStyle: 'bold', align: 'center', wordWrap: { width: cardW - 24 } }).setOrigin(0.5).setDepth(3002);
+            const dsc  = this.add.text(cx, cardY + 45, choice.desc, { fontFamily: 'monospace', fontSize: '15px', color: '#cccccc', align: 'center', wordWrap: { width: cardW - 24 } }).setOrigin(0.5).setDepth(3002);
+            elements.push(card, num, ttl, dsc);
+            card.on('pointerover', () => card.setFillStyle(0x3d3020));
+            card.on('pointerout',  () => card.setFillStyle(0x2a2118));
+            card.on('pointerdown', () => this.applyUpgrade(choice, elements, keyHandler));
+        });
+
+        const keyHandler = (event : KeyboardEvent) => {
+            const idx = parseInt(event.key, 10) - 1;
+            if (idx >= 0 && idx < choices.length) {
+                this.applyUpgrade(choices[idx], elements, keyHandler);
+            }
+        };
+        this.input.keyboard!.on('keydown', keyHandler);
+    }
+
+    applyUpgrade(choice : any, elements : Phaser.GameObjects.GameObject[], keyHandler : any) : void {
+        this.input.keyboard!.off('keydown', keyHandler);
+        choice.apply();
+        elements.forEach(e => e.destroy());
+        this.isPaused = false;
+        this.upgradeActive = false;
+        this.physics.resume();
+        this.lastFired = this.time.now;   // evita rajada acumulada
+        this.updateHUD();
+    }
+
+    // --- TEXTURAS GERADAS POR CÓDIGO ---
+    createTextures() : void {
+        if (!this.textures.exists('xpgem')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x44ff88, 1); g.fillCircle(7, 7, 6);
+            g.lineStyle(2, 0xffffff, 0.9); g.strokeCircle(7, 7, 6);
+            g.generateTexture('xpgem', 14, 14); g.destroy();
+        }
+        if (!this.textures.exists('blade')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x999999, 1); g.fillTriangle(0, 4, 26, 7, 0, 11);
+            g.fillStyle(0xeeeeee, 1); g.fillTriangle(2, 6, 22, 7, 2, 9);
+            g.fillStyle(0x5a3a1a, 1); g.fillRect(0, 3, 5, 8);
+            g.generateTexture('blade', 28, 14); g.destroy();
+        }
+        // Skins de projétil por arma
+        if (!this.textures.exists('proj_revolver')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0xaa7711, 1); g.fillCircle(7, 7, 6);
+            g.fillStyle(0xffcc33, 1); g.fillCircle(7, 7, 4);
+            g.fillStyle(0xffffaa, 1); g.fillCircle(6, 6, 2);
+            g.generateTexture('proj_revolver', 14, 14); g.destroy();
+        }
+        if (!this.textures.exists('proj_shotgun')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x884400, 1); g.fillCircle(5, 5, 4);
+            g.fillStyle(0xff8822, 1); g.fillCircle(5, 5, 2.5);
+            g.generateTexture('proj_shotgun', 10, 10); g.destroy();
+        }
+        if (!this.textures.exists('proj_rifle')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x118899, 1); g.fillRoundedRect(0, 2, 20, 6, 3);
+            g.fillStyle(0x44ddff, 1); g.fillRoundedRect(2, 3, 16, 4, 2);
+            g.fillStyle(0xffffff, 1); g.fillCircle(17, 5, 2);
+            g.generateTexture('proj_rifle', 22, 10); g.destroy();
+        }
+    }
+
+    // --- HUD ---
+    createHUD() : void {
+        const { width } = GameOptions.gameSize;
+        const d = 1000;
+
+        this.add.rectangle(0, 0, width, 8, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0).setDepth(d);
+        this.xpBarFill = this.add.rectangle(0, 0, 0, 8, 0x33ccff).setOrigin(0, 0).setScrollFactor(0).setDepth(d + 1);
+
+        this.add.rectangle(20, 24, 220, 22, 0x000000, 0.6).setOrigin(0, 0).setScrollFactor(0).setDepth(d).setStrokeStyle(2, 0xffffff, 0.4);
+        this.hpBarFill = this.add.rectangle(22, 26, 216, 18, 0x44dd55).setOrigin(0, 0).setScrollFactor(0).setDepth(d + 1);
+        this.hpText    = this.add.text(132, 35, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(d + 2);
+
+        this.levelText  = this.add.text(20, 54, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffdd44', fontStyle: 'bold' }).setScrollFactor(0).setDepth(d);
+        this.weaponText = this.add.text(20, 76, '', { fontFamily: 'monospace', fontSize: '15px', color: '#ff8844', fontStyle: 'bold' }).setScrollFactor(0).setDepth(d);
+
+        this.timeText  = this.add.text(width / 2, 30, '', { fontFamily: 'monospace', fontSize: '26px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(d);
+        this.scoreText = this.add.text(width - 20, 24, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffffff' }).setOrigin(1, 0).setScrollFactor(0).setDepth(d);
+        this.killsText = this.add.text(width - 20, 48, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffaaaa' }).setOrigin(1, 0).setScrollFactor(0).setDepth(d);
+
+        this.updateHUD();
+    }
+
+    updateWeaponHUD() : void {
+        const w = this.currentWeapon;
+        this.weaponText.setText(`Arma: ${WEAPONS[w].name} Nv ${this.weaponLevels[w]}`);
+    }
+
+    updateHUD() : void {
+        const hpRatio = Phaser.Math.Clamp(this.playerHP / this.playerMaxHP, 0, 1);
+        this.hpBarFill.width = 216 * hpRatio;
+        this.hpBarFill.setFillStyle(hpRatio > 0.5 ? 0x44dd55 : hpRatio > 0.25 ? 0xddaa33 : 0xdd3333);
+        this.hpText.setText(`${Math.ceil(this.playerHP)} / ${this.playerMaxHP}`);
+
+        const xpRatio = Phaser.Math.Clamp(this.xp / this.xpToNext, 0, 1);
+        this.xpBarFill.width = GameOptions.gameSize.width * xpRatio;
+
+        this.levelText.setText(`Nível ${this.level}`);
+
+        const min = Math.floor(this.elapsedMs / 60000);
+        const sec = Math.floor((this.elapsedMs % 60000) / 1000);
+        this.timeText.setText(`${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`);
+
+        this.scoreText.setText(`Pontos: ${this.score}`);
+        this.killsText.setText(`Abates: ${this.kills}`);
+    }
+
+    createBackground() : void {
+        const { width, height } = GameOptions.gameSize;
+        const gfx = this.add.graphics();
+
+        gfx.fillStyle(0xc4a265);
+        gfx.fillRect(0, 0, width, height);
+
+        const patches = [
+            { x: 60,  y: 80,  w: 90,  h: 50,  c: 0xb8954f },
+            { x: 200, y: 30,  w: 120, h: 60,  c: 0xd4b478 },
+            { x: 420, y: 110, w: 80,  h: 45,  c: 0xb09040 },
+            { x: 600, y: 50,  w: 100, h: 55,  c: 0xcaa055 },
+            { x: 700, y: 200, w: 70,  h: 40,  c: 0xb8954f },
+            { x: 50,  y: 300, w: 110, h: 50,  c: 0xd4b478 },
+            { x: 300, y: 350, w: 95,  h: 60,  c: 0xb09040 },
+            { x: 500, y: 400, w: 80,  h: 45,  c: 0xc4a060 },
+            { x: 150, y: 500, w: 130, h: 55,  c: 0xb8954f },
+            { x: 650, y: 550, w: 90,  h: 50,  c: 0xd0ac6a },
+            { x: 350, y: 620, w: 100, h: 60,  c: 0xb09040 },
+            { x: 80,  y: 680, w: 120, h: 55,  c: 0xc4a060 },
+            { x: 500, y: 700, w: 85,  h: 45,  c: 0xb8954f },
+            { x: 720, y: 720, w: 70,  h: 50,  c: 0xd4b478 },
+        ];
+        patches.forEach(p => { gfx.fillStyle(p.c); gfx.fillEllipse(p.x, p.y, p.w, p.h); });
+
+        gfx.lineStyle(1, 0xa88848, 0.25);
+        const tileSize = 40;
+        for (let x = 0; x <= width; x += tileSize) gfx.lineBetween(x, 0, x, height);
+        for (let y = 0; y <= height; y += tileSize) gfx.lineBetween(0, y, width, y);
+
+        const grassColor = 0x8a9a3a;
+        const tufts = [
+            [120, 150], [280, 90],  [450, 200], [620, 140], [740, 320],
+            [90,  420], [320, 480], [560, 530], [180, 620], [680, 660],
+            [400, 740], [760, 760], [240, 760], [500, 80],  [660, 400],
+        ];
+        tufts.forEach(([tx, ty]) => {
+            gfx.fillStyle(grassColor, 0.7);
+            gfx.fillTriangle(tx, ty, tx - 6, ty + 14, tx + 6, ty + 14);
+            gfx.fillTriangle(tx + 8, ty + 4, tx + 2, ty + 16, tx + 14, ty + 16);
+            gfx.fillTriangle(tx - 8, ty + 4, tx - 14, ty + 16, tx - 2, ty + 16);
+        });
+
+        gfx.setDepth(-10);
     }
 }

@@ -31,14 +31,24 @@ export class PreloadAssets extends Phaser.Scene {
         this.load.spritesheet('gaucho_attack_shotgun', './assets/Gaucho_Attack_Shotgun.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
         this.load.spritesheet('gaucho_attack_whip', './assets/Gaucho_Attack_Whip.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
 
-        // Carregando os assets de inimigos e tiros
-        this.load.image('enemy', './assets/sprites/enemy.png');
+        // Carregando os spritesheets dos inimigos
+        this.load.spritesheet('inimigo1_walk',   './assets/enemies/Inimigo1_Walk.png',   { frameWidth: 183, frameHeight: 179 });
+        this.load.spritesheet('inimigo1_attack', './assets/enemies/Inimigo1_Attack.png', { frameWidth: 181, frameHeight: 177 });
+        this.load.spritesheet('inimigo2_walk',   './assets/enemies/Inimigo2_Walk.png',   { frameWidth: 182, frameHeight: 179 });
+        this.load.spritesheet('inimigo2_attack', './assets/enemies/Inimigo2_Attack.png', { frameWidth: 183, frameHeight: 175 });
+        this.load.spritesheet('inimigo3_walk',   './assets/enemies/Inimigo3_Walk.png',   { frameWidth: 183, frameHeight: 179 });
+        this.load.spritesheet('inimigo3_attack', './assets/enemies/Inimigo3_Attack.png', { frameWidth: 183, frameHeight: 178 });
+        this.load.spritesheet('inimigo4_walk',   './assets/enemies/Inimigo4_Walk.png',   { frameWidth: 182, frameHeight: 172 });
+        this.load.spritesheet('inimigo5_walk',   './assets/enemies/Inimigo5_Walk.png',   { frameWidth: 181, frameHeight: 179 });
+        this.load.spritesheet('inimigo5_attack', './assets/enemies/Inimigo5_Attack.png', { frameWidth: 183, frameHeight: 179 });
+
+        // Carregando os assets de tiros
         this.load.image('bullet', './assets/sprites/bullet.png');
     }
 
     // method to be executed when the scene is created
     create(): void {
-        // start PlayGame scene
-        this.scene.start('PlayGame');
+        // start Menu scene
+        this.scene.start('Menu');
     }
 }
