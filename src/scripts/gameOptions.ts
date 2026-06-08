@@ -17,6 +17,12 @@ export const GameOptions : any = {
     enemyRate               : 800,      // enemy spawn rate base, in milliseconds
     enemyBaseHP             : 6,        // vida base: 2 tiros de revólver ou 2 chicotadas
 
+    // --- INIMIGO ATIRADOR (pistoleiro) ---
+    enemyShootRange         : 280,      // distância em que o pistoleiro para e atira
+    enemyShootRate          : 1600,     // intervalo entre tiros do pistoleiro (ms)
+    enemyBulletSpeed        : 220,      // velocidade do projétil inimigo
+    enemyBulletDamage       : 8,        // dano do projétil inimigo no jogador
+
     // --- VIDA DO JOGADOR ---
     playerMaxHP             : 100,      // vida máxima do jogador
     enemyDamage             : 10,       // dano que cada inimigo causa ao tocar

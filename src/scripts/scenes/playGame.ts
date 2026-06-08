@@ -43,11 +43,13 @@ export class PlayGame extends Phaser.Scene {
         });
     }
 
-    controlKeys : any;
-    player      : Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-    enemyGroup  : Phaser.Physics.Arcade.Group;
-    bulletGroup : Phaser.Physics.Arcade.Group;
-    gemGroup    : Phaser.Physics.Arcade.Group;
+    controlKeys      : any;
+    player           : Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
+    enemyGroup       : Phaser.Physics.Arcade.Group;
+    bulletGroup      : Phaser.Physics.Arcade.Group;
+    enemyBulletGroup : Phaser.Physics.Arcade.Group;
+    gemGroup         : Phaser.Physics.Arcade.Group;
+    obstacleGroup    : Phaser.Physics.Arcade.StaticGroup;
 
     // --- ESTADO DO JOGO ---
     playerHP      : number;
@@ -157,9 +159,20 @@ export class PlayGame extends Phaser.Scene {
             });
         });
 
-        this.enemyGroup  = this.physics.add.group();
-        this.bulletGroup = this.physics.add.group();
-        this.gemGroup    = this.physics.add.group();
+        // Animações de ataque do pistoleiro (inimigo5)
+        ['down', 'up', 'right', 'left'].forEach((dir, i) => {
+            const animKey = `inimigo5_attack_${dir}`;
+            if (!this.anims.exists(animKey)) {
+                this.anims.create({ key: animKey, frames: this.anims.generateFrameNumbers('inimigo5_attack', { start: i * 4, end: i * 4 + 3 }), frameRate: 8, repeat: -1 });
+            }
+        });
+
+        this.enemyGroup       = this.physics.add.group();
+        this.bulletGroup      = this.physics.add.group();
+        this.enemyBulletGroup = this.physics.add.group();
+        this.gemGroup         = this.physics.add.group();
+        this.obstacleGroup    = this.physics.add.staticGroup();
+        this.createObstacles();
 
         const keyboard : Phaser.Input.Keyboard.KeyboardPlugin = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin;
         this.controlKeys = keyboard.addKeys({
@@ -191,10 +204,34 @@ export class PlayGame extends Phaser.Scene {
             }
         });
 
-        // Jogador x Inimigo (dano)
-        this.physics.add.overlap(this.player, this.enemyGroup, (_p : any, enemy : any) => this.damagePlayer(enemy));
+        // Jogador x Inimigo (dano por contato)
+        this.physics.add.overlap(this.player, this.enemyGroup, (_p : any, enemy : any) => this.damagePlayer(enemy.x, enemy.y, GameOptions.enemyDamage));
         // Jogador x Gema (coleta)
         this.physics.add.overlap(this.player, this.gemGroup, (_p : any, gem : any) => this.collectGem(gem));
+
+        // Jogador e inimigos colidem com os obstáculos (bloqueio de movimento)
+        this.physics.add.collider(this.player, this.obstacleGroup);
+        this.physics.add.collider(this.enemyGroup, this.obstacleGroup);
+
+        // Projétil do jogador x Obstáculo (some; se for destrutível, leva dano)
+        this.physics.add.collider(this.bulletGroup, this.obstacleGroup, (bullet : any, obs : any) => {
+            this.hitObstacle(obs, bullet.getData('damage') || 1);
+            this.bulletGroup.killAndHide(bullet);
+            bullet.body.checkCollision.none = true;
+            bullet.body.enable = false;
+        });
+
+        // Projétil inimigo x Jogador (dano) — a cobertura corta a linha de tiro
+        this.physics.add.overlap(this.player, this.enemyBulletGroup, (_p : any, bullet : any) => {
+            this.damagePlayer(bullet.x, bullet.y, GameOptions.enemyBulletDamage);
+            this.enemyBulletGroup.killAndHide(bullet);
+            bullet.body.enable = false;
+        });
+        // Projétil inimigo x Obstáculo (some — é o escudo funcionando)
+        this.physics.add.collider(this.enemyBulletGroup, this.obstacleGroup, (bullet : any) => {
+            this.enemyBulletGroup.killAndHide(bullet);
+            bullet.body.enable = false;
+        });
 
         this.createHUD();
         this.equipWeapon('revolver');
@@ -208,6 +245,7 @@ export class PlayGame extends Phaser.Scene {
 
         this.elapsedMs += delta;
         this.updateHUD();
+        this.cleanupEnemyBullets();
 
         if (this.time.now > this.lastSpawn + this.spawnRate()) {
             this.spawnEnemy();
@@ -256,19 +294,29 @@ export class PlayGame extends Phaser.Scene {
         const inner = new Phaser.Geom.Rectangle(-50, -50, W + 100, H + 100);
         const spawnPoint = Phaser.Geom.Rectangle.RandomOutside(outer, inner);
 
-        const keys  = ['inimigo1_walk', 'inimigo2_walk', 'inimigo3_walk', 'inimigo4_walk', 'inimigo5_walk'];
-        const names = ['inimigo1', 'inimigo2', 'inimigo3', 'inimigo4', 'inimigo5'];
-        const idx = Phaser.Math.Between(0, keys.length - 1);
+        // Depois de 20s, ~25% dos inimigos são atiradores (pistoleiros) — usam o inimigo5
+        const isShooter = this.elapsedMs > 20000 && Math.random() < 0.25;
 
-        const enemy : any = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, keys[idx], 0);
+        let type : string;
+        if (isShooter) {
+            type = 'inimigo5';
+        } else {
+            const names = ['inimigo1', 'inimigo2', 'inimigo3', 'inimigo4', 'inimigo5'];
+            type = names[Phaser.Math.Between(0, names.length - 1)];
+        }
+
+        const enemy : any = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, `${type}_walk`, 0);
         enemy.setScale(0.5);
         const maxHp = GameOptions.enemyBaseHP + this.difficulty();
-        enemy.setData('type', names[idx]);
+        enemy.setData('type', type);
+        enemy.setData('role', isShooter ? 'ranged' : 'melee');
         enemy.setData('hp', maxHp);
         enemy.setData('maxHp', maxHp);
         enemy.setData('bladeCd', 0);
+        enemy.setData('shootCd', this.time.now + GameOptions.enemyShootRate);
         enemy.body.setSize(enemy.width * 0.5, enemy.height * 0.5);
-        enemy.anims.play(`${names[idx]}_down`, true);
+        enemy.anims.play(`${type}_down`, true);
+        if (isShooter) enemy.setTint(0xffcc88);   // leve destaque dourado no pistoleiro
         this.enemyGroup.add(enemy);
 
         // Barra de vida abaixo do inimigo
@@ -297,15 +345,26 @@ export class PlayGame extends Phaser.Scene {
     updateEnemies() : void {
         const speed = GameOptions.enemySpeed + this.difficulty() * 6;
         this.enemyGroup.getMatching('visible', true).forEach((enemy : any) => {
-            this.physics.moveToObject(enemy, this.player, speed);
             const type = enemy.getData('type') as string;
+            const role = enemy.getData('role') as string;
+            const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+
+            if (role === 'ranged' && dist < GameOptions.enemyShootRange) {
+                // Pistoleiro: para na distância de tiro e dispara
+                enemy.setVelocity(0, 0);
+                if (this.time.now > enemy.getData('shootCd')) {
+                    enemy.setData('shootCd', this.time.now + GameOptions.enemyShootRate);
+                    this.fireEnemyBullet(enemy);
+                }
+            } else {
+                this.physics.moveToObject(enemy, this.player, speed);
+            }
+
             const dx = this.player.x - enemy.x;
             const dy = this.player.y - enemy.y;
-            if (Math.abs(dx) > Math.abs(dy)) {
-                enemy.anims.play(dx > 0 ? `${type}_right` : `${type}_left`, true);
-            } else {
-                enemy.anims.play(dy > 0 ? `${type}_down` : `${type}_up`, true);
-            }
+            const attackSuffix = (role === 'ranged' && dist < GameOptions.enemyShootRange && enemy.getData('type') === 'inimigo5') ? '_attack' : '';
+            const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+            enemy.anims.play(`${type}${attackSuffix}_${dir}`, true);
 
             // Acompanha a barra de vida abaixo do inimigo
             const barBg   = enemy.getData('barBg');
@@ -319,6 +378,86 @@ export class PlayGame extends Phaser.Scene {
                 barFill.setFillStyle(ratio > 0.5 ? 0x33dd44 : ratio > 0.25 ? 0xddaa33 : 0xdd3333);
             }
         });
+    }
+
+    // --- O PISTOLEIRO ATIRA NO JOGADOR ---
+    fireEnemyBullet(enemy : any) : void {
+        getSound().shoot('rifle');
+        const bullet : any = this.enemyBulletGroup.get(enemy.x, enemy.y, 'enemy_bullet');
+        if (!bullet) return;
+        bullet.setTexture('enemy_bullet');
+        bullet.setActive(true).setVisible(true);
+        bullet.body.enable = true;
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+        bullet.setVelocity(Math.cos(angle) * GameOptions.enemyBulletSpeed, Math.sin(angle) * GameOptions.enemyBulletSpeed);
+        bullet.setRotation(angle);
+    }
+
+    // Recolhe projéteis inimigos que saíram da tela
+    cleanupEnemyBullets() : void {
+        const { width, height } = GameOptions.gameSize;
+        this.enemyBulletGroup.getMatching('visible', true).forEach((b : any) => {
+            if (b.x < -40 || b.x > width + 40 || b.y < -40 || b.y > height + 40) {
+                this.enemyBulletGroup.killAndHide(b);
+                b.body.enable = false;
+            }
+        });
+    }
+
+    // --- DANO A UM OBSTÁCULO DESTRUTÍVEL ---
+    hitObstacle(obs : any, dmg : number) : void {
+        if (!obs.getData('destructible')) return;
+        const hp = obs.getData('hp') - dmg;
+        obs.setData('hp', hp);
+        obs.setTintFill(0xffffff);
+        this.time.delayedCall(60, () => { if (obs.active) obs.clearTint(); });
+        if (hp <= 0) {
+            const ox = obs.x, oy = obs.y;
+            const drop = obs.getData('drop');
+            obs.destroy();
+            this.spawnDeathPuff(ox, oy);
+            if (drop === 'heal') {
+                this.playerHP = Math.min(this.playerMaxHP, this.playerHP + 20);
+                this.updateHUD();
+            } else if (drop === 'xp') {
+                const gem : any = this.gemGroup.get(ox, oy, 'xpgem');
+                if (gem) { gem.setActive(true).setVisible(true); gem.body.enable = true; gem.setVelocity(0, 0); }
+            }
+        }
+    }
+
+    // --- ESPALHA OBSTÁCULOS PELO CENÁRIO ---
+    createObstacles() : void {
+        const { width, height } = GameOptions.gameSize;
+        const cx = width / 2, cy = height / 2;
+        const placed : { x : number, y : number }[] = [];
+
+        // Tipos: rock/fence sólidos; barrel/bush destrutíveis com loot
+        const kinds = [
+            { tex: 'rock',   destructible: false, hp: 0,  drop: ''     },
+            { tex: 'fence',  destructible: false, hp: 0,  drop: ''     },
+            { tex: 'barrel', destructible: true,  hp: 8,  drop: 'heal' },
+            { tex: 'bush',   destructible: true,  hp: 4,  drop: 'xp'   },
+        ];
+
+        let attempts = 0;
+        const target = 14;
+        while (placed.length < target && attempts < 200) {
+            attempts++;
+            const x = Phaser.Math.Between(70, width - 70);
+            const y = Phaser.Math.Between(120, height - 70);
+            // Evita o centro (spawn do jogador) e sobreposição com outros obstáculos
+            if (Phaser.Math.Distance.Between(x, y, cx, cy) < 130) continue;
+            if (placed.some(p => Phaser.Math.Distance.Between(x, y, p.x, p.y) < 80)) continue;
+            placed.push({ x, y });
+
+            const k = kinds[Phaser.Math.Between(0, kinds.length - 1)];
+            const obs : any = this.obstacleGroup.create(x, y, k.tex);
+            obs.setDepth(1);
+            obs.setData('destructible', k.destructible);
+            obs.setData('hp', k.hp);
+            obs.setData('drop', k.drop);
+        }
     }
 
     updateGems() : void {
@@ -560,13 +699,13 @@ export class PlayGame extends Phaser.Scene {
         this.showUpgradeMenu();
     }
 
-    damagePlayer(enemy : any) : void {
+    damagePlayer(srcX : number, srcY : number, dmg : number) : void {
         if (this.isInvincible || this.isGameOver) return;
-        this.playerHP -= GameOptions.enemyDamage;
+        this.playerHP -= dmg;
         this.isInvincible = true;
         getSound().hurt();
 
-        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+        const angle = Phaser.Math.Angle.Between(srcX, srcY, this.player.x, this.player.y);
         this.player.setVelocity(Math.cos(angle) * GameOptions.knockbackForce, Math.sin(angle) * GameOptions.knockbackForce);
         this.knockbackUntil = this.time.now + GameOptions.knockbackMs;
 
@@ -783,6 +922,48 @@ export class PlayGame extends Phaser.Scene {
             g.fillStyle(0x44ddff, 1); g.fillRoundedRect(2, 3, 16, 4, 2);
             g.fillStyle(0xffffff, 1); g.fillCircle(17, 5, 2);
             g.generateTexture('proj_rifle', 22, 10); g.destroy();
+        }
+        // Projétil do inimigo (vermelho, distinto do seu)
+        if (!this.textures.exists('enemy_bullet')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x661111, 1); g.fillCircle(7, 7, 6);
+            g.fillStyle(0xff3322, 1); g.fillCircle(7, 7, 4);
+            g.fillStyle(0xffdd44, 1); g.fillCircle(6, 6, 2);
+            g.generateTexture('enemy_bullet', 14, 14); g.destroy();
+        }
+        // Obstáculo: pedra
+        if (!this.textures.exists('rock')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x6b6b6b, 1); g.fillEllipse(22, 24, 40, 32);
+            g.fillStyle(0x8a8a8a, 1); g.fillEllipse(18, 19, 26, 18);
+            g.fillStyle(0x555555, 1); g.fillEllipse(28, 30, 16, 10);
+            g.generateTexture('rock', 44, 44); g.destroy();
+        }
+        // Obstáculo: cerca de madeira
+        if (!this.textures.exists('fence')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x6b4a2a, 1);
+            g.fillRect(4, 6, 8, 38); g.fillRect(34, 6, 8, 38);   // postes
+            g.fillStyle(0x8a6038, 1);
+            g.fillRect(0, 14, 46, 6); g.fillRect(0, 28, 46, 6);  // travessas
+            g.generateTexture('fence', 46, 46); g.destroy();
+        }
+        // Obstáculo destrutível: barril
+        if (!this.textures.exists('barrel')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x7a4a1e, 1); g.fillRoundedRect(6, 4, 28, 36, 6);
+            g.fillStyle(0x5a3614, 1); g.fillRect(6, 12, 28, 4); g.fillRect(6, 26, 28, 4);
+            g.fillStyle(0x9a6030, 1); g.fillRect(16, 4, 4, 36);
+            g.generateTexture('barrel', 40, 44); g.destroy();
+        }
+        // Obstáculo destrutível: arbusto
+        if (!this.textures.exists('bush')) {
+            const g = this.make.graphics({ x: 0, y: 0 });
+            g.fillStyle(0x3f6b2a, 1);
+            g.fillCircle(14, 26, 12); g.fillCircle(28, 26, 13); g.fillCircle(21, 18, 13);
+            g.fillStyle(0x4f8035, 1);
+            g.fillCircle(16, 22, 7); g.fillCircle(27, 23, 6);
+            g.generateTexture('bush', 42, 40); g.destroy();
         }
     }
 
