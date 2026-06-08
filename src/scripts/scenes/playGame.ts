@@ -80,6 +80,7 @@ export class PlayGame extends Phaser.Scene {
 
     // --- HUD ---
     xpDisplayRatio : number;
+    xpBarBg    : Phaser.GameObjects.Rectangle;
     hpBarFill  : Phaser.GameObjects.Rectangle;
     hpText     : Phaser.GameObjects.Text;
     xpBarFill  : Phaser.GameObjects.Rectangle;
@@ -770,7 +771,7 @@ export class PlayGame extends Phaser.Scene {
         } else {
             this.isPaused = true;
             this.physics.pause();
-            const { width, height } = GameOptions.gameSize;
+            const width = this.scale.width, height = this.scale.height;
             this.pauseElems.push(this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.6).setScrollFactor(0).setDepth(2500));
             this.pauseElems.push(this.add.text(width / 2, height / 2 - 20, 'PAUSADO', {
                 fontFamily: 'monospace', fontSize: '54px', color: '#ffffff', fontStyle: 'bold',
@@ -791,7 +792,7 @@ export class PlayGame extends Phaser.Scene {
         snd.stopMusic();
         snd.gameOver();
 
-        const { width, height } = GameOptions.gameSize;
+        const width = this.scale.width, height = this.scale.height;
         this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.65).setScrollFactor(0).setDepth(2000);
         this.add.text(width / 2, height / 2 - 80, 'VOCÊ TOMBOU', {
             fontFamily: 'monospace', fontSize: '52px', color: '#ff5555', fontStyle: 'bold',
@@ -820,7 +821,7 @@ export class PlayGame extends Phaser.Scene {
         this.upgradeActive = true;
         this.physics.pause();
 
-        const { width, height } = GameOptions.gameSize;
+        const width = this.scale.width, height = this.scale.height;
 
         // Trocar para outra arma (substitui a atual). Marca "(nova)" se ainda não desbloqueada.
         const switchChoices = Object.keys(WEAPONS).filter(w => w !== this.currentWeapon).map(w => {
@@ -984,10 +985,10 @@ export class PlayGame extends Phaser.Scene {
 
     // --- HUD ---
     createHUD() : void {
-        const { width } = GameOptions.gameSize;
+        const width = this.scale.width;
         const d = 1000;
 
-        this.add.rectangle(0, 0, width, 8, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0).setDepth(d);
+        this.xpBarBg = this.add.rectangle(0, 0, width, 8, 0x000000, 0.5).setOrigin(0, 0).setScrollFactor(0).setDepth(d);
         this.xpBarFill = this.add.rectangle(0, 0, 0, 8, 0x33ccff).setOrigin(0, 0).setScrollFactor(0).setDepth(d + 1);
 
         this.add.rectangle(20, 24, 220, 22, 0x000000, 0.6).setOrigin(0, 0).setScrollFactor(0).setDepth(d).setStrokeStyle(2, 0xffffff, 0.4);
@@ -1015,10 +1016,17 @@ export class PlayGame extends Phaser.Scene {
         this.hpBarFill.setFillStyle(hpRatio > 0.5 ? 0x44dd55 : hpRatio > 0.25 ? 0xddaa33 : 0xdd3333);
         this.hpText.setText(`${Math.ceil(this.playerHP)} / ${this.playerMaxHP}`);
 
+        // Mantém o HUD ancorado às bordas em qualquer resolução
+        const sw = this.scale.width;
+        this.xpBarBg.setSize(sw, 8);
+        this.timeText.setX(sw / 2);
+        this.scoreText.setX(sw - 20);
+        this.killsText.setX(sw - 20);
+
         // Barra de XP sobe suavemente (lerp) em vez de pular
         const xpRatio = Phaser.Math.Clamp(this.xp / this.xpToNext, 0, 1);
         this.xpDisplayRatio = Phaser.Math.Linear(this.xpDisplayRatio, xpRatio, 0.15);
-        this.xpBarFill.width = GameOptions.gameSize.width * this.xpDisplayRatio;
+        this.xpBarFill.width = sw * this.xpDisplayRatio;
 
         this.levelText.setText(`Nível ${this.level}`);
 

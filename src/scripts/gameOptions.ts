@@ -8,8 +8,8 @@ export const GameOptions : any = {
         height              : 800       // altura da janela/câmera, em pixels
     },
     worldSize : {
-        width               : 2200,     // largura do mundo (campo) — câmera segue o jogador
-        height              : 2200      // altura do mundo
+        width               : 3000,     // largura do mundo (campo) — maior que telas desktop
+        height              : 3000      // altura do mundo
     },
     gameBackgroundColor     : 0x222222, // game background color
 

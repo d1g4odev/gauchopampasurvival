@@ -1,6 +1,5 @@
 // MENU INICIAL
 
-import { GameOptions } from '../gameOptions';
 import { getSound } from '../soundManager';
 
 export class Menu extends Phaser.Scene {
@@ -10,7 +9,7 @@ export class Menu extends Phaser.Scene {
     }
 
     create() : void {
-        const { width, height } = GameOptions.gameSize;
+        const width = this.scale.width, height = this.scale.height;
 
         // Fundo no clima do pampa
         this.cameras.main.setBackgroundColor('#1a1410');

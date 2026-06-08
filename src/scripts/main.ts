@@ -9,11 +9,11 @@ import { GameOptions } from './gameOptions';                    // game options
 
 // object to initialize the Scale Manager
 const scaleObject : Phaser.Types.Core.ScaleConfig = {
-    mode        : Phaser.Scale.FIT,                             // adjust size to automatically fit
-    autoCenter  : Phaser.Scale.CENTER_BOTH,                     // center the game horizontally and vertically
+    mode        : Phaser.Scale.RESIZE,                          // canvas ocupa toda a janela (sem barras)
+    autoCenter  : Phaser.Scale.CENTER_BOTH,                     // centraliza
     parent      : 'thegame',                                    // DOM id where to render the game
-    width       : GameOptions.gameSize.width,                   // game width, in pixels
-    height      : GameOptions.gameSize.height                   // game height, in pixels
+    width       : window.innerWidth,                            // largura inicial = janela
+    height      : window.innerHeight                            // altura inicial = janela
 }
 
 // game configuration object
