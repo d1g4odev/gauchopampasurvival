@@ -91,7 +91,7 @@ Você equipa **uma arma por vez** (a escolha vem no level up). Cada uma tem iden
 | Linguagem | [TypeScript](https://www.typescriptlang.org/) |
 | Bundler | [Webpack 5](https://webpack.js.org/) + ts-loader |
 | Áudio | Web Audio API (síntese procedural, sem arquivos) |
-| Gráficos gerados | Texturas de projéteis, obstáculos e gemas criadas por código |
+| Sprites & arte | Spritesheets do gaúcho e dos inimigos + sprites de cenário (chão, pedras, cercas, barris, arbustos) e projéteis, em PNG |
 | Deploy | [Vercel](https://vercel.com/) |
 
 ---
@@ -127,7 +127,10 @@ npm run distribution
 src/
 ├── index.html              # página que hospeda o canvas
 ├── style.css               # tela cheia responsiva
-├── assets/                 # spritesheets do gaúcho e dos inimigos
+├── assets/                 # sprites: gaúcho, inimigos, cenário e projéteis
+│   ├── enemies/            # spritesheets dos inimigos
+│   ├── scenery/            # sprites de chão e obstáculos (chão, pedra, cerca, barril, arbusto)
+│   └── projectiles/        # sprites de projéteis (revólver, espingarda, rifle, faca, bala inimiga)
 └── scripts/
     ├── main.ts             # configuração do Phaser (cenas, escala, física)
     ├── gameOptions.ts      # parâmetros de jogo (vida, XP, dificuldade…)

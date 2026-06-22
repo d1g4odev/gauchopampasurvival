@@ -130,7 +130,6 @@ export class PlayGame extends Phaser.Scene {
         snd.startMusic();
 
         this.createBackground();
-        this.createTextures();
 
         // Animações de caminhada de cada arma (grade 4x4: down/up/right/left)
         Object.keys(WEAPONS).forEach(w => {
@@ -909,80 +908,6 @@ export class PlayGame extends Phaser.Scene {
         this.updateHUD();
     }
 
-    // --- TEXTURAS GERADAS POR CÓDIGO ---
-    createTextures() : void {
-        if (!this.textures.exists('blade')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x999999, 1); g.fillTriangle(0, 4, 26, 7, 0, 11);
-            g.fillStyle(0xeeeeee, 1); g.fillTriangle(2, 6, 22, 7, 2, 9);
-            g.fillStyle(0x5a3a1a, 1); g.fillRect(0, 3, 5, 8);
-            g.generateTexture('blade', 28, 14); g.destroy();
-        }
-        // Skins de projétil por arma
-        if (!this.textures.exists('proj_revolver')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0xaa7711, 1); g.fillCircle(7, 7, 6);
-            g.fillStyle(0xffcc33, 1); g.fillCircle(7, 7, 4);
-            g.fillStyle(0xffffaa, 1); g.fillCircle(6, 6, 2);
-            g.generateTexture('proj_revolver', 14, 14); g.destroy();
-        }
-        if (!this.textures.exists('proj_shotgun')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x884400, 1); g.fillCircle(5, 5, 4);
-            g.fillStyle(0xff8822, 1); g.fillCircle(5, 5, 2.5);
-            g.generateTexture('proj_shotgun', 10, 10); g.destroy();
-        }
-        if (!this.textures.exists('proj_rifle')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x118899, 1); g.fillRoundedRect(0, 2, 20, 6, 3);
-            g.fillStyle(0x44ddff, 1); g.fillRoundedRect(2, 3, 16, 4, 2);
-            g.fillStyle(0xffffff, 1); g.fillCircle(17, 5, 2);
-            g.generateTexture('proj_rifle', 22, 10); g.destroy();
-        }
-        // Projétil do inimigo (vermelho, distinto do seu)
-        if (!this.textures.exists('enemy_bullet')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x661111, 1); g.fillCircle(7, 7, 6);
-            g.fillStyle(0xff3322, 1); g.fillCircle(7, 7, 4);
-            g.fillStyle(0xffdd44, 1); g.fillCircle(6, 6, 2);
-            g.generateTexture('enemy_bullet', 14, 14); g.destroy();
-        }
-        // Obstáculo: pedra
-        if (!this.textures.exists('rock')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x6b6b6b, 1); g.fillEllipse(22, 24, 40, 32);
-            g.fillStyle(0x8a8a8a, 1); g.fillEllipse(18, 19, 26, 18);
-            g.fillStyle(0x555555, 1); g.fillEllipse(28, 30, 16, 10);
-            g.generateTexture('rock', 44, 44); g.destroy();
-        }
-        // Obstáculo: cerca de madeira
-        if (!this.textures.exists('fence')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x6b4a2a, 1);
-            g.fillRect(4, 6, 8, 38); g.fillRect(34, 6, 8, 38);   // postes
-            g.fillStyle(0x8a6038, 1);
-            g.fillRect(0, 14, 46, 6); g.fillRect(0, 28, 46, 6);  // travessas
-            g.generateTexture('fence', 46, 46); g.destroy();
-        }
-        // Obstáculo destrutível: barril
-        if (!this.textures.exists('barrel')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x7a4a1e, 1); g.fillRoundedRect(6, 4, 28, 36, 6);
-            g.fillStyle(0x5a3614, 1); g.fillRect(6, 12, 28, 4); g.fillRect(6, 26, 28, 4);
-            g.fillStyle(0x9a6030, 1); g.fillRect(16, 4, 4, 36);
-            g.generateTexture('barrel', 40, 44); g.destroy();
-        }
-        // Obstáculo destrutível: arbusto
-        if (!this.textures.exists('bush')) {
-            const g = this.make.graphics({ x: 0, y: 0 });
-            g.fillStyle(0x3f6b2a, 1);
-            g.fillCircle(14, 26, 12); g.fillCircle(28, 26, 13); g.fillCircle(21, 18, 13);
-            g.fillStyle(0x4f8035, 1);
-            g.fillCircle(16, 22, 7); g.fillCircle(27, 23, 6);
-            g.generateTexture('bush', 42, 40); g.destroy();
-        }
-    }
-
     // --- HUD ---
     createHUD() : void {
         const width = this.scale.width;
@@ -1038,6 +963,7 @@ export class PlayGame extends Phaser.Scene {
         this.killsText.setText(`Abates: ${this.kills}`);
     }
 
+    // Monta o cenário do mundo (terra, grade e tufos de grama) a partir dos assets de chão.
     createBackground() : void {
         const width  = GameOptions.worldSize.width;
         const height = GameOptions.worldSize.height;

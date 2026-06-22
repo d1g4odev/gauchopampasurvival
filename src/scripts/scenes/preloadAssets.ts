@@ -45,6 +45,21 @@ export class PreloadAssets extends Phaser.Scene {
 
         // Carregando os assets de tiros
         this.load.image('bullet', './assets/sprites/bullet.png');
+
+        // --- CENÁRIO / MAPA (antes gerado por código em createTextures/createBackground) ---
+        this.load.image('ground_tile', './assets/scenery/ground_tile.png');
+        this.load.image('grass_tuft',  './assets/scenery/grass_tuft.png');
+        this.load.image('rock',        './assets/scenery/rock.png');
+        this.load.image('fence',       './assets/scenery/fence.png');
+        this.load.image('barrel',      './assets/scenery/barrel.png');
+        this.load.image('bush',        './assets/scenery/bush.png');
+
+        // --- PROJÉTEIS (antes gerados por código) ---
+        this.load.image('blade',        './assets/projectiles/blade.png');
+        this.load.image('proj_revolver','./assets/projectiles/proj_revolver.png');
+        this.load.image('proj_shotgun', './assets/projectiles/proj_shotgun.png');
+        this.load.image('proj_rifle',   './assets/projectiles/proj_rifle.png');
+        this.load.image('enemy_bullet', './assets/projectiles/enemy_bullet.png');
     }
 
     // method to be executed when the scene is created
