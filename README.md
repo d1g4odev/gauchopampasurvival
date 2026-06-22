@@ -11,6 +11,10 @@
 
 **▶️ Jogue agora:** [gauchopampasurvival.vercel.app](https://gauchopampasurvival.vercel.app)
 
+<br>
+
+![Gameplay do Gaúcho Pampa Survival](docs/demo.gif)
+
 </div>
 
 ---
