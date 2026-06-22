@@ -19,6 +19,7 @@ export const GameOptions : any = {
     bulletSpeed             : 200,      // bullet speed, in pixels per second
     bulletRate              : 1000,     // bullet rate, in milliseconds per bullet
     enemyRate               : 800,      // enemy spawn rate base, in milliseconds
+    maxEnemies              : 30,       // máximo de inimigos vivos ao mesmo tempo
     enemyBaseHP             : 6,        // vida base: 2 tiros de revólver ou 2 chicotadas
 
     // --- INIMIGO ATIRADOR (pistoleiro) ---
@@ -34,13 +35,19 @@ export const GameOptions : any = {
     knockbackMs             : 180,      // duração do empurrão ao levar dano
     knockbackForce          : 260,      // força do empurrão
 
-    // --- PONTUAÇÃO / XP ---
+    // --- PONTUAÇÃO ---
     scorePerKill            : 10,       // pontos por inimigo morto
-    xpMelee                 : 5,        // xp ganho ao matar inimigo corpo-a-corpo
-    xpShooter               : 10,       // xp ganho ao matar o pistoleiro
-    healPerKills            : 3,        // a cada N abates, cura o jogador
-    healAmount              : 10,       // quantidade de vida curada
-    baseXpToLevel           : 30,       // xp necessário para o primeiro nível
-    xpGrowth                : 1.4       // multiplicador de xp por nível
+    healPerKills            : 5,        // a cada N abates, cura um pouco o jogador
+    healAmount              : 5,        // quantidade de vida curada (reduzida p/ ter tensão)
+
+    // --- PROGRESSÃO POR ABATES ---
+    // Subir de nível exige matar uma quantidade mínima de mobs (cresce a cada nível)
+    baseKillsToLevel        : 5,        // abates para subir do nível 1 para o 2
+    killsGrowthPerLevel     : 3,        // abates extras exigidos a cada nível seguinte
+
+    // --- POPULAÇÃO DE INIMIGOS POR NÍVEL ---
+    // O teto de inimigos vivos cresce com o NÍVEL (não com o tempo) — evita 30 mobs no nível 2
+    baseMaxEnemies          : 6,        // teto de inimigos vivos no nível 1
+    enemiesPerLevel         : 2         // +inimigos no teto a cada nível (limitado por maxEnemies)
 
 }

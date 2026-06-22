@@ -78,6 +78,14 @@ export class PlayGame extends Phaser.Scene {
     orbitals        : Phaser.GameObjects.Image[];
     orbitAngle      : number;
 
+    // --- PODERES / ATRIBUTOS DO PERSONAGEM ---
+    critChance      : number;   // chance de dano crítico (x2)
+    lifestealOnKill : number;   // vida recuperada por abate
+    hpRegenPerSec   : number;   // regeneração passiva de vida por segundo
+    thornsDamage    : number;   // dano refletido a quem encosta no jogador
+    dodgeChance     : number;   // chance de esquivar de um dano
+    offArrows       : Phaser.GameObjects.Triangle[];   // setas de inimigos fora da tela
+
     // --- HUD ---
     xpDisplayRatio : number;
     xpBarBg    : Phaser.GameObjects.Rectangle;
@@ -99,8 +107,8 @@ export class PlayGame extends Phaser.Scene {
         this.score          = 0;
         this.kills          = 0;
         this.level          = 1;
-        this.xp             = 0;
-        this.xpToNext       = GameOptions.baseXpToLevel;
+        this.xp             = 0;                              // abates acumulados no nível atual
+        this.xpToNext       = GameOptions.baseKillsToLevel;   // abates necessários para o próximo nível
         this.xpDisplayRatio = 0;
         this.elapsedMs      = 0;
         this.lastSpawn      = 0;
@@ -121,6 +129,13 @@ export class PlayGame extends Phaser.Scene {
         this.orbitals        = [];
         this.orbitAngle      = 0;
         this.pauseElems      = [];
+
+        this.critChance      = 0;
+        this.lifestealOnKill = 0;
+        this.hpRegenPerSec   = 0;
+        this.thornsDamage    = 0;
+        this.dodgeChance     = 0;
+        this.offArrows       = [];
 
         GameOptions.playerSpeed = GameOptions.basePlayerSpeed;
 
@@ -215,8 +230,12 @@ export class PlayGame extends Phaser.Scene {
             }
         });
 
-        // Jogador x Inimigo (dano por contato)
-        this.physics.add.overlap(this.player, this.enemyGroup, (_p : any, enemy : any) => this.damagePlayer(enemy.x, enemy.y, GameOptions.enemyDamage));
+        // Jogador x Inimigo (dano por contato; Espinhos reflete dano de volta no toque)
+        this.physics.add.overlap(this.player, this.enemyGroup, (_p : any, enemy : any) => {
+            const willHit = !this.isInvincible && !this.isGameOver;
+            this.damagePlayer(enemy.x, enemy.y, GameOptions.enemyDamage);
+            if (willHit && this.thornsDamage > 0 && enemy.active) this.damageEnemy(enemy, this.thornsDamage);
+        });
         // Jogador e inimigos colidem com os obstáculos (bloqueio de movimento)
         this.physics.add.collider(this.player, this.obstacleGroup);
         this.physics.add.collider(this.enemyGroup, this.obstacleGroup);
@@ -254,8 +273,15 @@ export class PlayGame extends Phaser.Scene {
         this.elapsedMs += delta;
         this.updateHUD();
         this.cleanupEnemyBullets();
+        this.updateOffscreenIndicators();
 
-        if (this.time.now > this.lastSpawn + this.spawnRate()) {
+        // Regeneração passiva de vida (upgrade)
+        if (this.hpRegenPerSec > 0 && this.playerHP < this.playerMaxHP) {
+            this.playerHP = Math.min(this.playerMaxHP, this.playerHP + this.hpRegenPerSec * delta / 1000);
+        }
+
+        // Spawna respeitando o teto de inimigos vivos do nível atual
+        if (this.time.now > this.lastSpawn + this.spawnRate() && this.enemyGroup.countActive(true) < this.maxEnemiesForLevel()) {
             this.spawnEnemy();
             this.lastSpawn = this.time.now;
         }
@@ -289,9 +315,19 @@ export class PlayGame extends Phaser.Scene {
         this.updateOrbitals();
     }
 
-    // --- DIFICULDADE PROGRESSIVA ---
-    difficulty() : number { return Math.floor(this.elapsedMs / 30000); }
-    spawnRate() : number { return Math.max(250, GameOptions.enemyRate - this.difficulty() * 60); }
+    // --- DIFICULDADE PROGRESSIVA (escala com o NÍVEL, com leve componente de tempo) ---
+    difficulty() : number { return (this.level - 1) + Math.floor(this.elapsedMs / 60000); }
+    spawnRate() : number { return Math.max(300, GameOptions.enemyRate - (this.level - 1) * 70 - Math.floor(this.elapsedMs / 60000) * 40); }
+
+    // Teto de inimigos vivos ao mesmo tempo — cresce com o nível, limitado por maxEnemies
+    maxEnemiesForLevel() : number {
+        return Math.min(GameOptions.maxEnemies, GameOptions.baseMaxEnemies + this.level * GameOptions.enemiesPerLevel);
+    }
+
+    // Abates necessários para subir do nível atual
+    killsNeeded() : number {
+        return GameOptions.baseKillsToLevel + (this.level - 1) * GameOptions.killsGrowthPerLevel;
+    }
 
     spawnEnemy() : void {
         // Inimigos nascem logo fora da área visível (ao redor do jogador), não nas bordas do mundo
@@ -300,8 +336,9 @@ export class PlayGame extends Phaser.Scene {
         const inner = new Phaser.Geom.Rectangle(view.x - 40,  view.y - 40,  view.width + 80,  view.height + 80);
         const spawnPoint = Phaser.Geom.Rectangle.RandomOutside(outer, inner);
 
-        // Depois de 20s, ~25% dos inimigos são atiradores (pistoleiros) — usam o inimigo5
-        const isShooter = this.elapsedMs > 20000 && Math.random() < 0.25;
+        // A partir do nível 2, parte dos inimigos são atiradores (pistoleiros) — chance cresce com o nível
+        const shooterChance = Math.min(0.35, 0.08 + (this.level - 1) * 0.03);
+        const isShooter = this.level >= 2 && Math.random() < shooterChance;
 
         let type : string;
         if (isShooter) {
@@ -427,7 +464,10 @@ export class PlayGame extends Phaser.Scene {
                 this.showFloatText('+20', ox, oy - 20, '#44ff66');
                 this.updateHUD();
             } else if (drop === 'xp') {
-                this.grantXP(GameOptions.xpShooter, ox, oy);
+                // Arbusto dá progresso de nível (equivale a um abate)
+                this.showFloatText('+1', ox, oy - 20, '#7ddcff', 14);
+                this.gainLevelProgress();
+                this.updateHUD();
             }
         }
     }
@@ -545,6 +585,18 @@ export class PlayGame extends Phaser.Scene {
         }
         this.lastFired = this.time.now;
         getSound().shoot(key);
+        this.muzzleFlash(angle);
+    }
+
+    // Clarão rápido na direção do tiro (feedback visual)
+    muzzleFlash(angle : number) : void {
+        const fx = this.player.x + Math.cos(angle) * 26;
+        const fy = this.player.y - 18 + Math.sin(angle) * 26;
+        const flash = this.add.circle(fx, fy, 7, 0xfff2a8, 0.95).setDepth(7);
+        this.tweens.add({
+            targets: flash, scale: 1.8, alpha: 0, duration: 110,
+            onComplete: () => flash.destroy(),
+        });
     }
 
     fireProjectile(weaponKey : string, baseAngle : number, pierce : number, angleOffsetDeg : number) : void {
@@ -650,9 +702,19 @@ export class PlayGame extends Phaser.Scene {
 
     damageEnemy(enemy : any, dmg : number) : void {
         if (!enemy.active) return;
-        const hp = enemy.getData('hp') - dmg;
+
+        // Crítico: chance de dobrar o dano
+        const isCrit = this.critChance > 0 && Math.random() < this.critChance;
+        const finalDmg = isCrit ? dmg * 2 : dmg;
+
+        const hp = enemy.getData('hp') - finalDmg;
         enemy.setData('hp', hp);
         getSound().hit();
+
+        // Número de dano subindo (amarelo/maior no crítico)
+        const shown = Math.max(1, Math.round(finalDmg));
+        this.showFloatText(isCrit ? `${shown}!` : `${shown}`, enemy.x + Phaser.Math.Between(-6, 6), enemy.y - 14,
+            isCrit ? '#ffd23f' : '#ffffff', isCrit ? 22 : 15);
 
         enemy.setTintFill(0xffffff);
         this.time.delayedCall(60, () => { if (enemy.active) enemy.clearTint(); });
@@ -678,22 +740,27 @@ export class PlayGame extends Phaser.Scene {
         getSound().death();
         this.spawnDeathPuff(ex, ey);
 
-        // XP direto: atirador vale mais que o corpo-a-corpo
-        const xpGain = enemy.getData('role') === 'ranged' ? GameOptions.xpShooter : GameOptions.xpMelee;
-        this.grantXP(xpGain, ex, ey);
+        // Progressão: cada abate conta para subir de nível
+        this.gainLevelProgress();
 
-        // Cura a cada N abates (se não estiver com a vida cheia)
+        // Sede de Sangue (upgrade): cura por abate
+        if (this.lifestealOnKill > 0 && this.playerHP < this.playerMaxHP) {
+            this.playerHP = Math.min(this.playerMaxHP, this.playerHP + this.lifestealOnKill);
+            this.showFloatText(`+${this.lifestealOnKill}`, ex, ey - 28, '#44ff66', 14);
+        }
+
+        // Auto-cura leve a cada N abates (se não estiver com a vida cheia)
         if (this.kills % GameOptions.healPerKills === 0 && this.playerHP < this.playerMaxHP) {
             this.playerHP = Math.min(this.playerMaxHP, this.playerHP + GameOptions.healAmount);
             this.showFloatText(`+${GameOptions.healAmount}`, this.player.x, this.player.y - 40, '#44ff66');
-            this.updateHUD();
         }
+        this.updateHUD();
     }
 
     // Balãozinho de texto subindo e sumindo (minimalista)
-    showFloatText(text : string, x : number, y : number, color : string) : void {
+    showFloatText(text : string, x : number, y : number, color : string, size : number = 18) : void {
         const t = this.add.text(x, y, text, {
-            fontFamily: 'monospace', fontSize: '18px', color, fontStyle: 'bold',
+            fontFamily: 'monospace', fontSize: `${size}px`, color, fontStyle: 'bold',
         }).setOrigin(0.5).setDepth(50);
         t.setStroke('#000000', 3);
         this.tweens.add({
@@ -702,12 +769,10 @@ export class PlayGame extends Phaser.Scene {
         });
     }
 
-    // Concede XP, mostra o balão "+N XP" e cuida do level up
-    grantXP(amount : number, x : number, y : number) : void {
-        this.xp += amount;
-        getSound().gem();
-        this.showFloatText(`+${amount} XP`, x, y - 20, '#7ddcff');
-        while (this.xp >= this.xpToNext) {
+    // Cada abate conta como 1 ponto de progresso; ao atingir o necessário, sobe de nível
+    gainLevelProgress() : void {
+        this.xp += 1;
+        if (this.xp >= this.xpToNext) {
             this.xp -= this.xpToNext;
             this.levelUp();
         }
@@ -715,13 +780,21 @@ export class PlayGame extends Phaser.Scene {
 
     levelUp() : void {
         this.level += 1;
-        this.xpToNext = Math.floor(this.xpToNext * GameOptions.xpGrowth);
+        this.xpToNext = this.killsNeeded();   // próximo nível exige mais abates
         getSound().levelUp();
+        this.cameras.main.flash(220, 255, 240, 180);   // clarão de level up (juice)
         this.showUpgradeMenu();
     }
 
     damagePlayer(srcX : number, srcY : number, dmg : number) : void {
         if (this.isInvincible || this.isGameOver) return;
+
+        // Esquiva (upgrade): chance de ignorar o dano por completo
+        if (this.dodgeChance > 0 && Math.random() < this.dodgeChance) {
+            this.showFloatText('ESQUIVA', this.player.x, this.player.y - 40, '#9adfff', 14);
+            return;
+        }
+
         this.playerHP -= dmg;
         this.isInvincible = true;
         getSound().hurt();
@@ -800,10 +873,36 @@ export class PlayGame extends Phaser.Scene {
         const min = Math.floor(this.elapsedMs / 60000);
         const sec = Math.floor((this.elapsedMs % 60000) / 1000);
         const timeStr = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+        // Recorde persistente (localStorage) — compara por pontuação
+        const best = this.loadBest();
+        const isNewRecord = this.score > best.score;
+        if (isNewRecord) {
+            this.saveBest({ score: this.score, kills: this.kills, level: this.level, timeMs: this.elapsedMs });
+        }
+        const bestNow = isNewRecord
+            ? { score: this.score, kills: this.kills, level: this.level, timeMs: this.elapsedMs }
+            : best;
+        const bestMin = Math.floor(bestNow.timeMs / 60000);
+        const bestSec = Math.floor((bestNow.timeMs % 60000) / 1000);
+        const bestTimeStr = `${bestMin.toString().padStart(2, '0')}:${bestSec.toString().padStart(2, '0')}`;
+
         this.add.text(width / 2, height / 2 + 10,
             `Tempo: ${timeStr}\nAbates: ${this.kills}\nPontos: ${this.score}\nNível: ${this.level}`, {
             fontFamily: 'monospace', fontSize: '24px', color: '#ffffff', align: 'center',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
+
+        if (isNewRecord) {
+            const rec = this.add.text(width / 2, height / 2 + 95, '★ NOVO RECORDE! ★', {
+                fontFamily: 'monospace', fontSize: '26px', color: '#ffdd44', fontStyle: 'bold',
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
+            this.tweens.add({ targets: rec, scale: 1.12, duration: 500, yoyo: true, repeat: -1 });
+        } else {
+            this.add.text(width / 2, height / 2 + 95,
+                `Recorde: ${bestNow.score} pts · ${bestTimeStr} · Nv ${bestNow.level}`, {
+                fontFamily: 'monospace', fontSize: '18px', color: '#aaaaaa',
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
+        }
 
         const hint = this.add.text(width / 2, height / 2 + 140, 'ESPAÇO joga de novo  •  ESC volta ao menu', {
             fontFamily: 'monospace', fontSize: '18px', color: '#ffcc44',
@@ -812,6 +911,21 @@ export class PlayGame extends Phaser.Scene {
 
         this.input.keyboard!.once('keydown-SPACE', () => this.scene.restart());
         this.input.keyboard!.once('keydown-ESC',   () => this.scene.start('Menu'));
+    }
+
+    // --- RECORDE PERSISTENTE (localStorage) ---
+    loadBest() : { score : number, kills : number, level : number, timeMs : number } {
+        const empty = { score: 0, kills: 0, level: 0, timeMs: 0 };
+        try {
+            const raw = localStorage.getItem('gaucho_best');
+            return raw ? { ...empty, ...JSON.parse(raw) } : empty;
+        } catch (e) {
+            return empty;
+        }
+    }
+
+    saveBest(best : { score : number, kills : number, level : number, timeMs : number }) : void {
+        try { localStorage.setItem('gaucho_best', JSON.stringify(best)); } catch (e) { /* ignora */ }
     }
 
     // --- MENU DE UPGRADE NO LEVEL UP ---
@@ -848,11 +962,19 @@ export class PlayGame extends Phaser.Scene {
             { title: 'Pés Ligeiros',   desc: '+15% velocidade',          weapon: false, apply: () => { GameOptions.playerSpeed *= 1.15; } },
             { title: 'Bala Veloz',     desc: '+25% vel. do projétil',    weapon: false, apply: () => { this.bulletSpeedMult *= 1.25; } },
             { title: 'Pampa Restaura', desc: 'Cura 40 de vida',          weapon: false, apply: () => { this.playerHP = Math.min(this.playerMaxHP, this.playerHP + 40); } },
+            // --- Novos poderes ---
+            { title: 'Olho de Águia',   desc: '+15% chance de crítico (x2 dano)', weapon: false, apply: () => { this.critChance = Math.min(0.85, this.critChance + 0.15); } },
+            { title: 'Sede de Sangue',  desc: '+4 de vida por abate',             weapon: false, apply: () => { this.lifestealOnKill += 4; } },
+            { title: 'Sangue do Pampa', desc: '+1.5 vida/seg (regeneração)',      weapon: false, apply: () => { this.hpRegenPerSec += 1.5; } },
+            { title: 'Couro de Espinho',desc: 'Inimigos levam 6 ao te tocar',     weapon: false, apply: () => { this.thornsDamage += 6; } },
+            { title: 'Corpo Mole',      desc: '+12% de esquiva',                  weapon: false, apply: () => { this.dodgeChance = Math.min(0.6, this.dodgeChance + 0.12); } },
         ];
 
-        // Monta 3 opções variadas: nível da arma atual + 1 troca de arma + atributos
-        const pool : any[] = [levelUpCurrent];
-        if (switchChoices.length > 0) pool.push(Phaser.Utils.Array.GetRandom(switchChoices));
+        // Monta 3 opções: 1 relacionada a arma (evoluir a atual OU trocar) + 2 atributos/poderes
+        const weaponOption = (switchChoices.length > 0 && Math.random() < 0.5)
+            ? Phaser.Utils.Array.GetRandom(switchChoices)
+            : levelUpCurrent;
+        const pool : any[] = [weaponOption];
         const rest = Phaser.Utils.Array.Shuffle([...statChoices]);
         for (const r of rest) {
             if (pool.length >= 3) break;
@@ -927,7 +1049,39 @@ export class PlayGame extends Phaser.Scene {
         this.scoreText = this.add.text(width - 20, 24, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffffff' }).setOrigin(1, 0).setScrollFactor(0).setDepth(d);
         this.killsText = this.add.text(width - 20, 48, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffaaaa' }).setOrigin(1, 0).setScrollFactor(0).setDepth(d);
 
+        // Setas indicando pistoleiros fora da tela (apontam para a ameaça)
+        this.offArrows = [];
+        for (let i = 0; i < 8; i++) {
+            const arrow = this.add.triangle(0, 0, 7, 0, 0, 14, 14, 14, 0xff5544)
+                .setScrollFactor(0).setDepth(d + 5).setVisible(false).setAlpha(0.9).setStrokeStyle(2, 0x550000, 0.8);
+            this.offArrows.push(arrow);
+        }
+
         this.updateHUD();
+    }
+
+    // Posiciona setas na borda da tela apontando os pistoleiros que estão fora da área visível
+    updateOffscreenIndicators() : void {
+        if (!this.offArrows || this.offArrows.length === 0) return;
+        const view = this.cameras.main.worldView;
+        const sw = this.scale.width, sh = this.scale.height;
+        const cxs = sw / 2, cys = sh / 2;
+        const margin = 34;
+        let idx = 0;
+        const enemies = this.enemyGroup.getMatching('active', true) as any[];
+        for (const e of enemies) {
+            if (idx >= this.offArrows.length) break;
+            if (e.getData('role') !== 'ranged') continue;                  // só pistoleiros
+            if (Phaser.Geom.Rectangle.Contains(view, e.x, e.y)) continue;  // já está visível
+            const ex = e.x - view.x, ey = e.y - view.y;
+            const ang = Math.atan2(ey - cys, ex - cxs);
+            const hw = cxs - margin, hh = cys - margin;
+            const tx = Math.cos(ang), ty = Math.sin(ang);
+            const reach = Math.min(Math.abs(hw / (tx || 1e-6)), Math.abs(hh / (ty || 1e-6)));
+            const arrow = this.offArrows[idx++];
+            arrow.setVisible(true).setPosition(cxs + tx * reach, cys + ty * reach).setRotation(ang + Math.PI / 2);
+        }
+        for (; idx < this.offArrows.length; idx++) this.offArrows[idx].setVisible(false);
     }
 
     updateWeaponHUD() : void {
@@ -953,7 +1107,8 @@ export class PlayGame extends Phaser.Scene {
         this.xpDisplayRatio = Phaser.Math.Linear(this.xpDisplayRatio, xpRatio, 0.15);
         this.xpBarFill.width = sw * this.xpDisplayRatio;
 
-        this.levelText.setText(`Nível ${this.level}`);
+        const faltam = Math.max(0, this.xpToNext - this.xp);
+        this.levelText.setText(`Nível ${this.level}  (faltam ${faltam} p/ subir)`);
 
         const min = Math.floor(this.elapsedMs / 60000);
         const sec = Math.floor((this.elapsedMs % 60000) / 1000);
