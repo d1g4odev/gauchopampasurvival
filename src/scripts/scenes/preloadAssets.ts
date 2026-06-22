@@ -19,7 +19,8 @@ export class PreloadAssets extends Phaser.Scene {
         // Mapped to 182x179 to evenly divide a 728x716 .png spritesheet
         this.load.spritesheet('gaucho_walk', './assets/Gaucho_Walk.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
         this.load.spritesheet('gaucho_walk_revolver', './assets/Gaucho_Walk_Revolver.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
-        this.load.spritesheet('gaucho_walk_knife', './assets/Gaucho_Walk_Knife.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
+        // O sheet da faca tem 726px de largura; frameWidth 182 só renderia 3 colunas (12 frames) e quebraria a animação "left" (frames 12-15). 181 garante 4 colunas = 16 frames.
+        this.load.spritesheet('gaucho_walk_knife', './assets/Gaucho_Walk_Knife.png', { frameWidth: 181, frameHeight: 179, margin: 0, spacing: 0 });
         this.load.spritesheet('gaucho_walk_rifle', './assets/Gaucho_Walk_Rifle.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
         this.load.spritesheet('gaucho_walk_shotgun', './assets/Gaucho_Walk_Shotgun.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
         this.load.spritesheet('gaucho_walk_whip', './assets/Gaucho_Walk_Whip.png', { frameWidth: 182, frameHeight: 179, margin: 0, spacing: 0 });
